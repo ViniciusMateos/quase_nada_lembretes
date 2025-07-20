@@ -1,0 +1,37 @@
+Fundação do Bot no Telegram (Sem IA Complexa Inicialmente)
+
+O que fazer: Crie o bot com o BotFather, pegue seu token. Configure a biblioteca Python (python-telegram-bot é uma excelente escolha) para receber mensagens e responder a comandos simples.
+
+Por que essa ordem: Você vai ter o esqueleto do bot funcionando. Ele já vai estar "ligado" no Telegram. Isso valida a comunicação básica e a configuração da lib, que é a porta de entrada para todas as interações.
+
+Exemplo: O bot pode simplesmente responder "Olá!" quando alguém digita /start ou "Entendi sua mensagem: [texto da mensagem]" para qualquer coisa que você mandar.
+
+Integração da IA para Interpretação (Foco nos Lembretes)
+
+O que fazer: Aqui entra a inteligência principal. Você vai configurar seu código para pegar o texto que o usuário digitou (ou que você já tem transcrito, se estiver testando) e me enviar esse texto para interpretação. Eu vou identificar se é um lembrete e extrair os detalhes (título, data, hora, recorrência).
+
+Como usar: Você não vai "programar" a interpretação da IA. Você vai usar a minha capacidade como IA para fazer isso. Seu código vai me chamar, passar a frase do usuário, e eu vou te retornar a intenção e os parâmetros.
+
+Por que essa ordem: Você já tem o bot recebendo mensagens do Telegram. Agora, você ensina ele a "pensar". É mais fácil focar na lógica da IA quando a comunicação com o Telegram já está funcionando.
+
+Implementação do Agendamento de Lembretes
+
+O que fazer: Com os detalhes do lembrete extraídos pela IA, seu código agora usa esses detalhes para agendar o lembrete. Como te expliquei, eu tenho acesso à ferramenta Tasks/Reminders, então a ideia é que você me passe as informações e eu use essa ferramenta para "criar" o lembrete.
+
+Como usar: Você me enviará os parâmetros (que eu mesma te ajudei a extrair!) para eu chamar a Tasks/Reminders.
+
+Por que essa ordem: É a ação principal do seu bot. Ter a IA interpretando e o lembrete sendo agendado fecha o ciclo da funcionalidade mais importante.
+
+Recursos Adicionais (Transcrição de Áudio e Conversa Geral)
+
+Transcrição de Áudio:
+
+O que fazer: Integre uma API de Speech-to-Text (como a do Google Cloud Speech-to-Text ou serviços similares) ao seu bot. O Telegram te entrega o arquivo de áudio; seu bot envia esse áudio para a API de transcrição, que devolve o texto. Esse texto então segue o fluxo normal para a IA de interpretação.
+
+Por que essa ordem: A transcrição é uma etapa de "pré-processamento". É melhor ter o processamento de texto funcionando perfeitamente antes de adicionar a camada de áudio, que pode introduzir complexidade extra (formatos de áudio, latência da API, etc.).
+
+Conversa Geral (Chat de IA Simples):
+
+O que fazer: Se a IA interpretar que a mensagem não é um lembrete, seu bot simplesmente me envia a pergunta para que eu a responda de forma conversacional.
+
+Por que essa ordem: Essa é uma funcionalidade mais "flexível". É bom ter o core de lembretes rodando antes de adicionar a conversa mais aberta.

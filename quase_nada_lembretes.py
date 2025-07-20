@@ -1,61 +1,1 @@
-import os
-from dotenv import load_dotenv
-import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-# Configura o log para ver o que está acontecendo
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# --- Funções do Bot ---
-
-# Função que responde ao comando /start
-async def start(update: Update, context):
-    """Envia uma mensagem quando o comando /start é emitido."""
-    user = update.effective_user
-    await update.message.reply_html(
-        f"Olá, {user.mention_html()}! Eu sou seu bot de lembretes. Como posso ajudar?",
-    )
-
-# Função que ecoa qualquer mensagem de texto que o usuário enviar
-async def echo(update: Update, context):
-    """Ecoa a mensagem do usuário."""
-    await update.message.reply_text(f"Você disse: {update.message.text}")
-
-# Função para lidar com erros
-async def error(update: Update, context):
-    """Registra Erros causados por Updates."""
-    logger.warning(f'Update "{update}" causou erro "{context.error}"')
-    if update.effective_message:
-        await update.effective_message.reply_text("Ops! Algo deu errado. Por favor, tente novamente mais tarde.")
-
-# --- Função Principal para Iniciar o Bot ---
-
-def main():
-    """Inicia o bot."""
-    
-    # Cria a Aplicação e passa o token do seu bot
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Adiciona os Handlers para os comandos e mensagens
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
-    # Adiciona o Handler para erros
-    application.add_error_handler(error)
-
-    # Inicia o bot (polling)
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+import asyncioimport osfrom dotenv import load_dotenvimport loggingfrom telegram import Updatefrom telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, ApplicationBuilderimport re# Carrega as variáveis de ambiente do arquivo .envload_dotenv()TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")# Configura o log para ver o que está acontecendologging.basicConfig(    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',    level=logging.INFO)logger = logging.getLogger(__name__)# --- Funções do Bot ---# Função que responde ao comando /startasync def start(update: Update, context):    """Envia uma mensagem quando o comando /start é emitido."""    user = update.effective_user    await update.message.reply_html(        f"Olá, {user.mention_html()}! Eu sou seu bot de lembretes. Como posso ajudar?",    )# Função que ecoa qualquer mensagem de texto que o usuário enviarasync def echo(update: Update, context):    """Ecoa a mensagem do usuário."""    await update.message.reply_text(f"Você disse: {update.message.text}")# Função para lidar com errosasync def error(update: Update, context):    """Registra Erros causados por Updates."""    logger.warning(f'Update "{update}" causou erro "{context.error}"')    if update.effective_message:        await update.effective_message.reply_text("Ops! Algo deu errado. Por favor, tente novamente mais tarde.")async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:    """Disparo do alarme"""    job = context.job    await context.bot.send_message(job.chat_id, text=f"Opa! O seu lembrete de {int(job.data)} segundos acabou!")async def agendar_lembrete(update: Update,  context: ContextTypes.DEFAULT_TYPE) -> None:    try:        # args[0] irá conter o tempo em segundos de quanto tempo de        chat_id = update.effective_message.chat_id        tempo = float(context.match.group(1))        if tempo < 0:            await update.effective_message.reply_text("Desculpe, não podemos viajar para o passado ou agendar tempo negativo!")            return        context.job_queue.run_once(disparar_alarme, tempo, chat_id=chat_id, name=str(chat_id), data=tempo)        text = f"Lembrete para daqui {int(tempo)} agendado com sucesso"        await update.effective_message.reply_text(text)    except (IndexError, ValueError):        await update.effective_message.reply_text("Use números para agendar algo!")# --- Função Principal para Iniciar o Bot ---async def post_init(app):    app.job_queue.set_application(app)    await app.job_queue.start()def main():    """Inicia o bot."""    mensagem_especifica = r"(?i)^vasco$"    lembrete_regex = r"(?i)^agendar lembrete para daqui (\d+(?:\.\d+)?)\s*segundos$"    # Cria a Aplicação e passa o token do seu bot    application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()    # Adiciona os Handlers para os comandos e mensagens    application.add_handler(MessageHandler(filters.TEXT & filters.Regex(lembrete_regex), agendar_lembrete))    #Quando a mensagem enviada for correspondente da variável "mensagem_especifica" ele roda a def "start"    application.add_handler(MessageHandler(filters.TEXT & filters.Regex(mensagem_especifica), start))    #Por conta do "~" (negação )antes do "filters.Regex", tudo que não for correspondente à "mensagem_especifica" ele vai chamar a def "echo"    application.add_handler(MessageHandler(filters.TEXT & ~filters.Regex(mensagem_especifica), echo))    # Adiciona o Handler para erros    application.add_error_handler(error)    # Inicia o bot (polling)    application.run_polling(allowed_updates=Update.ALL_TYPES)if __name__ == "__main__":    main()
