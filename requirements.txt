@@ -1,0 +1,24 @@
+# Para parsing de números escritos por extenso
+number-parser>=0.3.2
+
+# Para variáveis de ambiente
+python-dotenv>=1.0.0
+
+# Telegram Bot API
+python-telegram-bot>=20.0
+
+python-telegram-bot[job-queue]
+
+# Para manipulação de fusos horários
+pytz>=2024.0
+
+# Google Generative AI (legacy)
+google-generativeai>=0.8.5
+
+# Whisper para transcrição de áudio
+# openai-whisper>=2023.11.6
+
+# parse_number/ordinal
+# (já incluso em number-parser)
+
+# Outras bibliotecas padrão não precisam ser listadas
