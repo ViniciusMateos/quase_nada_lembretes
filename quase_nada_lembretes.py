@@ -8,7 +8,7 @@ from pytz import timezone as pytz_timezone  # Mais confiável para fusos horári
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, ApplicationBuilder
 import re
 import google.generativeai as genai
-import whisper
+# import whisper
 import json
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    model_whisper = whisper.load_model("medium")
+    # model_whisper = whisper.load_model("medium")
     logger.info("Modelo Whisper 'medium' carregado com sucesso.")
 except Exception as e:
     model_whisper = None

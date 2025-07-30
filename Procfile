@@ -1,1 +1,0 @@
-web: python quase_nada_lembretes.py
