@@ -19,4 +19,4 @@ pytz>=2024.0
 google-generativeai>=0.8.5
 
 # Whisper para transcrição de áudio
-openai-whisper>=2023.11.6
+# openai-whisper>=2023.11.6
