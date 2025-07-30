@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    # model_whisper = whisper.load_model("medium")
+    model_whisper = whisper.load_model("medium")
     logger.info("Modelo Whisper 'medium' carregado com sucesso.")
 except Exception as e:
     model_whisper = None
