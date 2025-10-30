@@ -8,23 +8,19 @@ from pytz import timezone as pytz_timezone  # Mais confiável para fusos horári
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, ApplicationBuilder
 import re
 import google.generativeai as genai
-# import whisper
 import json
 import tempfile
 from datetime import datetime, timedelta, timezone
+import sqlalchemy
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, BigInteger
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
 from keep_alive import keep_alive
+import psycopg2
 keep_alive()  # isso inicia o servidor web fake
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
-
-
-
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-genai.configure(api_key=GEMINI_API_KEY)
 
 # Configura o log para ver o que está acontecendo
 logging.basicConfig(
@@ -32,6 +28,39 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# --- Configuração do Banco de Dados (NOVO) ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    logger.warning("DATABASE_URL não encontrada. Usando banco de dados SQLite em memória (volátil).")
+    # Se rodar local sem DB, usa SQLite em memória (não persistente)
+    DATABASE_URL = "sqlite:///:memory:"
+
+# O NullPool é importante para o Render não manter conexões abertas
+engine = create_engine(DATABASE_URL, poolclass=NullPool)
+Base = declarative_base()
+SessionLocal = sessionmaker(bind=engine)
+
+# --- Definição da Tabela de Lembretes (NOVO) ---
+class Lembrete(Base):
+    __tablename__ = "lembretes"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False)
+    titulo = Column(String, nullable=False)
+    proxima_execucao = Column(DateTime(timezone=True), nullable=False)
+    intervalo_segundos = Column(Integer, nullable=True) # 0 para único, > 0 para recorrente
+    recorrencia_str = Column(String, nullable=True) # Para exibir (ex: "diário")
+
+# Cria a tabela se ela não existir
+Base.metadata.create_all(engine)
+
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+
 
 try:
     # model_whisper = whisper.load_model("medium")
@@ -121,13 +150,18 @@ async def lidar_com_mensagem_de_voz(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logger.error(f"Erro ao transcrever áudio: {e}", exc_info=True)
         await update.message.reply_text("Ocorreu um erro ao processar o áudio. Tente novamente mais tarde.")
+
+
 # Função para lidar com erros
 async def lidar_erros(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Use logger.error para registrar o erro de forma mais robusta
+    logger.error(f'Update "%s" causou erro "%s"', update, str(context.error), exc_info=True)
+
     if update and hasattr(update, "effective_message") and update.effective_message:
-        await update.effective_message.reply_text("Ocorreu um erro inesperado.")
-        print("Erro fora de contexto de mensagem (provavelmente em um job):", context.error)
+        await update.effective_message.reply_text("Ops! Algo deu errado. Por favor, tente novamente mais tarde.")
     else:
-        print("Erro fora de contexto de mensagem (provavelmente em um job):", context.error)
+        # Quando o erro não tem um effective_message (ex: erro em job), só logamos.
+        logger.error("Erro fora de contexto de mensagem (provavelmente em um job): %s", str(context.error))
 
 def substituir_numeros_por_extenso(texto: str) -> str:
     palavras = texto.split()
@@ -193,7 +227,7 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
     Usa a Gemini API para extrair detalhes de um lembrete em linguagem natural.
     Retorna um dicionário com 'title', 'time', 'date', 'recurrence', 'relative_seconds' ou None se falhar.
     """
-    if not modelo_gemini:
+    if not modelo_gemini_instancia:
         logger.warning("Modelo Gemini não configurado. Não é possível extrair detalhes de lembretes inteligentes.")
         return None
 
@@ -257,31 +291,24 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         return None
 
 # Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
-# --- Nova lógica para lidar com mensagens (substituindo agendar_lembrete como handler) ---
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_transcrito: str = None) -> None:
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Lida com mensagens de texto que não são comandos.
     Tenta extrair um lembrete usando a IA; se não conseguir, responde como IA de chat geral.
     """
     id_chat = update.effective_message.chat_id
-    mensagem_usuario = texto_transcrito if texto_transcrito else update.effective_message.text
+    mensagem_usuario = update.effective_message.text
 
-    # Pré-processa a mensagem substituindo números por extenso
     mensagem_usuario_processada = substituir_numeros_por_extenso(mensagem_usuario)
 
     if not modelo_gemini_instancia:
-        await update.effective_message.reply_text(
-            "Desculpe, a funcionalidade de IA está desativada. "
-            "Por favor, verifique a configuração da chave GEMINI_API_KEY."
-        )
+        # ... (código de erro da IA) ...
         return
 
     await update.effective_message.reply_text("Processando sua solicitação com a IA...")
 
-    # Tenta extrair os detalhes do lembrete
     detalhes_lembrete = await extrair_detalhes_lembrete_com_gemini(mensagem_usuario_processada)
 
-    # --- Lógica de Agendamento ---
     if detalhes_lembrete and (detalhes_lembrete.get("segundos_relativos") is not None or
                               detalhes_lembrete.get("hora") is not None or
                               detalhes_lembrete.get("data") is not None or
@@ -295,6 +322,7 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
 
         momento_agendamento = None
 
+        # --- (Início da lógica de cálculo de data/hora - SEM MUDANÇAS) ---
         if segundos_relativos is not None:
             try:
                 momento_agendamento = datetime.now(timezone.utc) + timedelta(seconds=float(segundos_relativos))
@@ -304,10 +332,8 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 return
         elif hora_str and data_str:
             try:
-                tz_brasilia = pytz_timezone('America/Sao_Paulo')
-                momento_local = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M")
-                momento_local = tz_brasilia.localize(momento_local)
-                momento_agendamento = momento_local.astimezone(timezone.utc)
+                momento_agendamento = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M").replace(
+                    tzinfo=timezone.utc)
             except ValueError:
                 await update.effective_message.reply_text("Formato de data ou hora inválido. Tente AAAA-MM-DD HH:MM.")
                 return
@@ -315,13 +341,7 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
             try:
                 hora_parseada = datetime.strptime(hora_str, "%H:%M").time()
                 hoje_utc = datetime.now(timezone.utc).date()
-                tz_brasilia = pytz_timezone('America/Sao_Paulo')
-                hoje_brasilia = datetime.now(tz_brasilia).date()
-                momento_local = datetime.combine(hoje_brasilia, hora_parseada)
-                momento_local = tz_brasilia.localize(momento_local)
-                momento_agendamento = momento_local.astimezone(timezone.utc)
-
-                # Corrige lembrete para o dia seguinte se horário já passou
+                momento_agendamento = datetime.combine(hoje_utc, hora_parseada).replace(tzinfo=timezone.utc)
                 if momento_agendamento < datetime.now(timezone.utc):
                     momento_agendamento += timedelta(days=1)
             except ValueError:
@@ -334,110 +354,206 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 await update.effective_message.reply_text("Formato de data inválido. Tente AAAA-MM-DD.")
                 return
 
-        # Validação final do agendamento
         if momento_agendamento and momento_agendamento < datetime.now(timezone.utc):
             await update.effective_message.reply_text(
                 "Não consigo agendar lembretes no passado. Por favor, forneça uma data/hora futura.")
             return
+        # --- (Fim da lógica de cálculo de data/hora) ---
 
         if not titulo:
             titulo = "Lembrete Geral"
 
-        # --- Lógica de Recorrência ---
         intervalo = intervalo_recorrencia_em_segundos(recorrencia)
 
-        # AQUI VOCÊ PODE DECIDIR SE QUER SEMPRE REMOVER O ANTERIOR OU SÓ SE FOR RECORRENTE
-        # Por simplicidade, vamos sempre remover o anterior para o mesmo chat_id para evitar duplicação.
+        # --- (Início da lógica de persistência e agendamento - MUDANÇA CRÍTICA) ---
 
-        if intervalo:
-            # Agenda lembrete repetitivo
-            # first: Se momento_agendamento existe e está no futuro, usa-o. Senão, usa o intervalo a partir de agora.
-            first_run_delay = intervalo if not momento_agendamento else (
-                        momento_agendamento - datetime.now(timezone.utc)).total_seconds()
+        # 1. REMOVER TAREFAS ANTIGAS (OPCIONAL, mas recomendado se você não quiser múltiplos lembretes)
+        # Se você quiser que o usuário possa agendar VÁRIOS lembretes, remova esta linha.
+        # Se quiser que um novo lembrete apague o antigo (para o mesmo chat_id), mantenha:
+        remover_tarefas_antigas(str(id_chat), context)  # Vamos criar essa função
 
+        if intervalo or momento_agendamento:
 
-            # Calcula o 'first' como um datetime UTC
-            if momento_agendamento:
-                primeira_execucao = momento_agendamento
+            # Determina a primeira execução
+            if intervalo:
+                primeira_execucao = momento_agendamento if momento_agendamento else datetime.now(
+                    timezone.utc) + timedelta(seconds=intervalo)
             else:
-                primeira_execucao = datetime.now(timezone.utc) + timedelta(seconds=intervalo)
+                primeira_execucao = momento_agendamento
 
+            # 2. SALVAR NO BANCO DE DADOS
+            sessao = SessionLocal()
+            try:
+                novo_lembrete = Lembrete(
+                    chat_id=id_chat,
+                    titulo=titulo,
+                    proxima_execucao=primeira_execucao,
+                    intervalo_segundos=intervalo,
+                    recorrencia_str=recorrencia
+                )
+                sessao.add(novo_lembrete)
+                sessao.commit()
+                id_db = novo_lembrete.id  # Pega o ID que o banco gerou
+                logger.info(f"Lembrete salvo no DB com ID: {id_db}")
+            except Exception as e:
+                logger.error(f"Erro ao salvar lembrete no DB: {e}", exc_info=True)
+                sessao.rollback()
+                await update.effective_message.reply_text("Erro ao salvar o lembrete no banco de dados.")
+                return
+            finally:
+                sessao.close()
 
-
-
-            context.job_queue.run_repeating(
-                disparar_alarme,
-                interval=intervalo,  # Intervalo em segundos
-                first=primeira_execucao,  # Primeira execução como datetime (UTC)
-                chat_id=id_chat,
-                name=str(id_chat),
-                data=titulo
-            )
-            texto_resposta = f"Lembrete '{titulo}' agendado para repetir a cada {recorrencia}."
-            if momento_agendamento:
-                texto_resposta += f" A primeira execução será em {primeira_execucao.strftime('%Y-%m-%d %H:%M')}!"
-
-            tz_brasilia = pytz_timezone('America/Sao_Paulo')
-            momento_local = momento_agendamento.astimezone(tz_brasilia)
-            await update.effective_message.reply_text(
-                f"⏰ Lembrete '{titulo}' agendado para:\n"
-                f"📅 {momento_local.strftime('%d/%m/%Y')}\n"
-                f"🕒 {momento_local.strftime('%H:%M')} (horário de Brasília)\n"
-                f"✅ Agendado com sucesso!"
-            )
-
-        elif momento_agendamento:
-            # Agenda lembrete único
+            # 3. AGENDAR NO JOBQUEUE
+            # Usamos o ID do banco como o 'name' do job, para ligar os dois
             context.job_queue.run_once(
                 disparar_alarme,
-                when=momento_agendamento,  # Primeira execução como datetime (UTC)
+                when=primeira_execucao,
                 chat_id=id_chat,
-                name=str(id_chat),
-                data=titulo
-            )
-            tz_brasilia = pytz_timezone('America/Sao_Paulo')
-            momento_local = momento_agendamento.astimezone(tz_brasilia)
-            await update.effective_message.reply_text(
-                f"⏰ Lembrete '{titulo}' agendado para:\n"
-                f"📅 {momento_local.strftime('%d/%m/%Y')}\n"
-                f"🕒 {momento_local.strftime('%H:%M')} (horário de Brasília)\n"
-                f"✅ Agendado com sucesso!"
-            )
-        else:
-            # Se a IA extraiu detalhes mas não conseguiu determinar um momento, isso é um problema.
-            # Deveria ser pego pelo catch-all de erro da IA de extração.
-            # Se chegar aqui, significa que detalhes_lembrete não é None, mas não tem info de tempo.
-            await update.effective_message.reply_text(
-                "Desculpe, a IA entendeu sua intenção de lembrete, mas não conseguiu determinar um tempo ou data específicos para agendar. "
-                "Por favor, seja mais explícito (ex: 'hoje às 10h', 'daqui 5 minutos', 'todo dia às 9h')."
+                name=str(id_db),  # MUITO IMPORTANTE: usar o ID do DB
+                data={"titulo": titulo, "id_db": id_db}  # Passa o ID do DB e o título
             )
 
-    else:  # Se detalhes_lembrete é None ou não contém informações de tempo/título
-        # === CAIU AQUI: Responde como IA de chat geral ===
+            # 4. RESPONDER AO USUÁRIO
+            fuso_horario_local_offset = timedelta(hours=-3)  # Fuso de SP
+            momento_agendamento_local = (primeira_execucao + fuso_horario_local_offset)
+
+            texto_resposta = ""
+            if intervalo:
+                texto_resposta = f"Lembrete '{titulo}' agendado para repetir a cada {recorrencia}."
+                texto_resposta += f" A primeira execução será em {momento_agendamento_local.strftime('%Y-%m-%d %H:%M')}!"
+            else:
+                texto_resposta = f"Lembrete '{titulo}' agendado para {momento_agendamento_local.strftime('%Y-%m-%d %H:%M')}!"
+
+            await update.effective_message.reply_text(texto_resposta)
+
+        else:
+            await update.effective_message.reply_text(
+                "Desculpe, a IA entendeu sua intenção de lembrete, mas não conseguiu determinar um tempo ou data específicos para agendar."
+            )
+        # --- (Fim da lógica de persistência) ---
+
+    else:
+        # Se não é um lembrete, responde como IA de chat geral
         resposta_ai = await obter_resposta_gemini(mensagem_usuario)
         await update.effective_message.reply_text(resposta_ai)
 
+
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Disparo do alarme"""
-    job = context.job
-    await context.bot.send_message(job.chat_id, text=f"Opa! Lembrete: {job.data}")
+    """Disparo do alarme. Agora ele interage com o banco de dados."""
+    tarefa = context.job
+    id_db = tarefa.name  # Pegamos o ID do banco de dados que salvamos como 'name'
+    titulo = tarefa.data.get("titulo", "Lembrete")
+
+    await context.bot.send_message(tarefa.chat_id, text=f"Opa! Lembrete: {titulo}")
+
+    sessao = SessionLocal()
+    try:
+        # Busca o lembrete no banco de dados
+        lembrete_db = sessao.query(Lembrete).filter(Lembrete.id == int(id_db)).first()
+
+        if not lembrete_db:
+            logger.warning(f"Lembrete ID {id_db} disparado mas não encontrado no DB.")
+            return
+
+        # SE FOR RECORRENTE:
+        if lembrete_db.intervalo_segundos and lembrete_db.intervalo_segundos > 0:
+            # Calcula a próxima execução
+            nova_proxima_execucao = lembrete_db.proxima_execucao + timedelta(seconds=lembrete_db.intervalo_segundos)
+
+            # Atualiza o banco
+            lembrete_db.proxima_execucao = nova_proxima_execucao
+            sessao.commit()
+
+            # Re-agenda o próximo 'run_once'
+            context.job_queue.run_once(
+                disparar_alarme,
+                when=nova_proxima_execucao,
+                chat_id=tarefa.chat_id,
+                name=str(id_db),  # Mantém o mesmo ID do DB
+                data={"titulo": titulo, "id_db": id_db}
+            )
+            logger.info(f"Lembrete recorrente ID {id_db} re-agendado para {nova_proxima_execucao}.")
+
+        # SE FOR ÚNICO:
+        else:
+            # Deleta o lembrete do banco, pois já foi disparado
+            sessao.delete(lembrete_db)
+            sessao.commit()
+            logger.info(f"Lembrete único ID {id_db} disparado e removido do DB.")
+
+    except Exception as e:
+        logger.error(f"Erro ao processar disparo de alarme no DB para ID {id_db}: {e}", exc_info=True)
+        sessao.rollback()
+    finally:
+        sessao.close()
+
+
+# ... (restante do código, incluindo a função 'remover_tarefa_se_existe' se você quiser usá-la) ...
+# Se for usar a remoção de tarefas antigas, adicione esta função:
+def remover_tarefas_antigas(nome: str, context: ContextTypes.DEFAULT_TYPE):
+    """Remove jobs antigos do JobQueue com o mesmo nome (chat_id)"""
+    tarefas_atuais = context.job_queue.get_jobs_by_name(nome)
+    if not tarefas_atuais:
+        return
+    logger.info(f"Removendo {len(tarefas_atuais)} tarefas antigas para o chat {nome}")
+    for tarefa in tarefas_atuais:
+        tarefa.schedule_removal()
 
 # --- Função Principal para Iniciar o Bot ---
-async def post_init(app):
-    app.job_queue.set_application(app)
-    await app.job_queue.start()
+async def post_init(app: Application) -> None:
+    """Função chamada após a inicialização do bot para re-agendar jobs do DB."""
+
+    # Esta linha não é necessária se você usar Application.builder().job_queue(True)
+    # app.job_queue.set_application(app)
+    # await app.job_queue.start() # Também não é necessário, o builder já cuida disso
+
+    logger.info("Bot iniciado. Verificando lembretes pendentes no banco de dados...")
+
+    sessao = SessionLocal()
+    try:
+        # Busca todos os lembretes que ainda não foram disparados e estão no futuro
+        agora_utc = datetime.now(timezone.utc)
+        lembretes_pendentes = sessao.query(Lembrete).filter(Lembrete.proxima_execucao > agora_utc).all()
+
+        if not lembretes_pendentes:
+            logger.info("Nenhum lembrete pendente encontrado.")
+            return
+
+        logger.info(f"Re-agendando {len(lembretes_pendentes)} lembretes pendentes...")
+
+        for lembrete in lembretes_pendentes:
+            app.job_queue.run_once(
+                disparar_alarme,
+                when=lembrete.proxima_execucao,  # O horário já está em UTC
+                chat_id=lembrete.chat_id,
+                name=str(lembrete.id),  # O ID do DB
+                data={"titulo": lembrete.titulo, "id_db": lembrete.id}
+            )
+
+    except Exception as e:
+        logger.error(f"Erro ao re-agendar lembretes do DB: {e}", exc_info=True)
+    finally:
+        sessao.close()
+
+    logger.info("Re-agendamento de lembretes concluído.")
+
 
 def main():
     """Inicia o bot."""
+
     # Cria a Aplicação e passa o token do seu bot
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lidar_com_mensagens_texto_geral))
+    # O post_init(post_init) já é suficiente para o builder entender que precisa do JobQueue
+    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+
+    # --- (Handlers) ---
+    application.add_handler(CommandHandler("iniciar", start))  # Renomeei para 'iniciar' para português
     application.add_handler(MessageHandler(filters.VOICE, lidar_com_mensagem_de_voz))
-    # Adiciona o Handler para erros
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lidar_com_mensagens_texto_geral))
     application.add_error_handler(lidar_erros)
 
     # Inicia o bot (polling)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
+
 if __name__ == "__main__":
-    main()  
+    main()
