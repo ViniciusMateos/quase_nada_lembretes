@@ -1,22 +1,18 @@
-flask
+# --- Keep-Alive / Servidor Web ---
+flask>=3.0.0 # Para criar o servidor web fake (keep_alive.py) para o Render/UptimeRobot
 
-# Para parsing de números escritos por extenso
-number-parser>=0.3.2
+# --- Processamento de Linguagem Natural (Texto e Áudio) ---
+number-parser>=0.3.2 # Para converter números por extenso (ex: "dois", "cinco") em dígitos ("2", "5")
+google-generativeai>=0.8.5 # Biblioteca da API do Google Gemini (para chat geral e extração de lembretes)
+openai-whisper>=2023.11.6 # Para transcrever áudio em texto (roda localmente no Render)
 
-# Para variáveis de ambiente
-python-dotenv>=1.0.0
+# --- Bot Telegram ---
+python-telegram-bot[job-queue]>=20.0 # A biblioteca principal do Telegram (PTB) com o JobQueue (agendador)
+pytz>=2024.0 # Para lidar com fusos horários (timezone) de forma confiável
 
-# Telegram Bot API
-python-telegram-bot>=20.0
+# --- Banco de Dados (PostgreSQL) ---
+SQLAlchemy>=2.0 # Biblioteca (ORM) para interagir com o banco de dados usando Python
+psycopg2-binary>=2.9.9 # Driver necessário para o SQLAlchemy "conversar" com o PostgreSQL
 
-#JobQueue PTB
-python-telegram-bot[job-queue]
-
-# Para manipulação de fusos horários
-pytz>=2024.0
-
-# Google Generative AI (legacy)
-google-generativeai>=0.8.5
-
-# Whisper para transcrição de áudio
-openai-whisper>=2023.11.6
+# --- Configuração ---
+python-dotenv>=1.0.0 # Para carregar variáveis de ambiente (tokens, chaves) do arquivo .env
