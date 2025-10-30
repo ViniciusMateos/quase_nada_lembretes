@@ -13,6 +13,3 @@ pytz>=2024.0 # Para lidar com fusos horários (timezone) de forma confiável
 # --- Banco de Dados (PostgreSQL) ---
 SQLAlchemy>=2.0 # Biblioteca (ORM) para interagir com o banco de dados usando Python
 psycopg2-binary>=2.9.9 # Driver necessário para o SQLAlchemy "conversar" com o PostgreSQL
-
-# --- Configuração ---
-python-dotenv>=1.0.0 # Para carregar variáveis de ambiente (tokens, chaves) do arquivo .env
