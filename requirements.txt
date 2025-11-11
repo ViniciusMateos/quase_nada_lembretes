@@ -10,8 +10,8 @@ openai-whisper>=2023.11.6 # Para transcrever áudio em texto (roda localmente no
 python-telegram-bot[job-queue]>=20.0 # A biblioteca principal do Telegram (PTB) com o JobQueue (agendador)
 pytz>=2024.0 # Para lidar com fusos horários (timezone) de forma confiável
 
-# Para variáveis de ambiente
-python-dotenv>=1.0.0
+    # Para variáveis de ambiente
+    python-dotenv>=1.0.0
 
 # --- Banco de Dados (PostgreSQL) ---
 SQLAlchemy>=2.0 # Biblioteca (ORM) para interagir com o banco de dados usando Python

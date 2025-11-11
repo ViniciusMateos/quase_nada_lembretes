@@ -9,7 +9,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import re
 import google.generativeai as genai
 import json
-import tempfile
 from datetime import datetime, timedelta, timezone
 import sqlalchemy
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, BigInteger
@@ -21,6 +20,8 @@ keep_alive()  # isso inicia o servidor web fake
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
+
+FUSO_HORARIO_LOCAL = pytz_timezone('America/Sao_Paulo')
 
 # Configura o log para ver o que está acontecendo
 logging.basicConfig(
@@ -60,16 +61,6 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-
-
-try:
-    # model_whisper = whisper.load_model("medium")
-    logger.info("Modelo Whisper 'medium' carregado com sucesso.")
-except Exception as e:
-    model_whisper = None
-    logger.error(f"ERRO AO CARREGAR MODELO WHISPER: {e}", exc_info=True)
-    logger.warning("Funcionalidade de transcrição de áudio pode estar desativada.")
-
 modelo_gemini_instancia = None # Inicializa a instância como None por padrão
 
 if GEMINI_API_KEY:
@@ -85,72 +76,22 @@ else:
     logger.warning("GEMINI_API_KEY não encontrada no arquivo .env. Funcionalidades da IA desativadas.")
 
 # --- Funções do Bot ---
+async def lidar_com_audio_rejeitado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Informa ao usuário que mensagens de áudio não são mais aceitas."""
 
+    # Vamos usar HTML para colocar a primeira linha em negrito
+    texto_html = (
+        "🚫\n"
+        "Só consigo processar lembretes por mensagem de <B>TEXTO</b>.\n"
+        "Por favor, <b>DIGITE</b> o que você precisa."
+        "\n🚫"
+    )
 
+    # Usamos reply_html para que o Telegram entenda a tag <b>
+    await update.message.reply_html(texto_html)
 
-# Função que responde ao comando /start
-async def start(update: Update, context):
-    """Envia uma mensagem quando o comando /start é emitido."""
-    user = update.effective_user
-    await update.message.reply_html(
-        f"Olá, {user.mention_html()}! Eu sou seu bot de lembretes. Como posso ajudar?",
-)
-
-# Função para processar mensagem de voz e transcrever
-async def transcrever_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.voice:
-        voice = update.message.voice
-        with tempfile.NamedTemporaryFile(suffix=".ogg") as temp_audio:
-            voice_file = await voice.get_file()
-            await voice_file.download_to_drive(custom_path=temp_audio.name)
-
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, model_whisper.transcribe, temp_audio.name)
-            texto_transcrito = result.get("text", "").strip()
-
-            return texto_transcrito
-
-# Handler para mensagem de voz que transcreve e repassa para a função de texto
-async def lidar_com_mensagem_de_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.voice:
-        await update.message.reply_text("Por favor, envie uma mensagem de voz para transcrever.")
-        return
-
-    await update.message.reply_text("🔍 Transcrevendo áudio...")
-
-    try:
-        # Cria um arquivo temporário com um nome único e fecha-o imediatamente
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_audio:
-            temp_path = temp_audio.name
-
-        try:
-            # Baixa o áudio para o arquivo
-            voice_file = await update.message.voice.get_file()
-            await voice_file.download_to_drive(custom_path=temp_path)
-
-            # Transcreve usando Whisper
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, model_whisper.transcribe, temp_path)
-            texto_transcrito = result.get("text", "").strip()
-
-            if not texto_transcrito:
-                await update.message.reply_text("Não consegui transcrever o áudio. Pode tentar novamente?")
-                return
-
-            await update.message.reply_text(f"🎤 Transcrição: {texto_transcrito}")
-            await lidar_com_mensagens_texto_geral(update, context, texto_transcrito=texto_transcrito)
-
-        finally:
-            # Garante que o arquivo temporário será removido
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-
-    except Exception as e:
-        logger.error(f"Erro ao transcrever áudio: {e}", exc_info=True)
-        await update.message.reply_text("Ocorreu um erro ao processar o áudio. Tente novamente mais tarde.")
-
+    # Usamos reply_html para que o Telegram entenda a tag <center>
+    await update.message.reply_html(texto_html)
 
 # Função para lidar com erros
 async def lidar_erros(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -290,20 +231,17 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         logger.error(f"Erro ao interagir com a Gemini API para extrair lembrete: {e}", exc_info=True)
         return None
 
-# Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+1# Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, ) -> None:
     """
     Lida com mensagens de texto que não são comandos.
     Tenta extrair um lembrete usando a IA; se não conseguir, responde como IA de chat geral.
     """
     id_chat = update.effective_message.chat_id
-    mensagem_usuario = update.effective_message.text
+    mensagem_usuario = update.effective_message.text  # Volta a pegar o texto diretamente
 
+    # Pré-processa a mensagem substituindo números por extenso
     mensagem_usuario_processada = substituir_numeros_por_extenso(mensagem_usuario)
-
-    if not modelo_gemini_instancia:
-        # ... (código de erro da IA) ...
-        return
 
     await update.effective_message.reply_text("Processando sua solicitação com a IA...")
 
@@ -332,16 +270,29 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 return
         elif hora_str and data_str:
             try:
-                momento_agendamento = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M").replace(
-                    tzinfo=timezone.utc)
+                # 1. Cria o datetime "naive" (sem fuso) a partir do que a IA extraiu
+                momento_local_naive = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M")
+                # 2. Localiza esse datetime no fuso de Brasília (torna "aware")
+                momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
+                # 3. Converte o momento de Brasília para UTC (para o JobQueue)
+                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
             except ValueError:
-                await update.effective_message.reply_text("Formato de data ou hora inválido. Tente AAAA-MM-DD HH:MM.")
+                await update.effective_message.reply_text(
+                    "Formato de data ou hora inválido. Tente AAAA-MM-DD HH:MM.")
                 return
         elif hora_str:
             try:
                 hora_parseada = datetime.strptime(hora_str, "%H:%M").time()
-                hoje_utc = datetime.now(timezone.utc).date()
-                momento_agendamento = datetime.combine(hoje_utc, hora_parseada).replace(tzinfo=timezone.utc)
+                # Pega o "hoje" no fuso de Brasília
+                hoje_local = datetime.now(FUSO_HORARIO_LOCAL).date()
+                # Combina a data de hoje (Brasília) com a hora (Brasília)
+                momento_local_naive = datetime.combine(hoje_local, hora_parseada)
+                # Localiza no fuso de Brasília
+                momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
+                # Converte para UTC
+                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
+
+                # Se a hora já passou HOJE (comparando em UTC), agenda para amanhã
                 if momento_agendamento < datetime.now(timezone.utc):
                     momento_agendamento += timedelta(days=1)
             except ValueError:
@@ -349,7 +300,10 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 return
         elif data_str:
             try:
-                momento_agendamento = datetime.strptime(data_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                # Assume 00:00 daquele dia no fuso local
+                data_local_naive = datetime.strptime(data_str, "%Y-%m-%d")
+                momento_local_aware = FUSO_HORARIO_LOCAL.localize(data_local_naive)
+                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
             except ValueError:
                 await update.effective_message.reply_text("Formato de data inválido. Tente AAAA-MM-DD.")
                 return
@@ -437,7 +391,6 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
         resposta_ai = await obter_resposta_gemini(mensagem_usuario)
         await update.effective_message.reply_text(resposta_ai)
 
-
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme. Agora ele interage com o banco de dados."""
     tarefa = context.job
@@ -487,8 +440,6 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     finally:
         sessao.close()
 
-
-# ... (restante do código, incluindo a função 'remover_tarefa_se_existe' se você quiser usá-la) ...
 # Se for usar a remoção de tarefas antigas, adicione esta função:
 def remover_tarefas_antigas(nome: str, context: ContextTypes.DEFAULT_TYPE):
     """Remove jobs antigos do JobQueue com o mesmo nome (chat_id)"""
@@ -537,7 +488,6 @@ async def post_init(app: Application) -> None:
 
     logger.info("Re-agendamento de lembretes concluído.")
 
-
 def main():
     """Inicia o bot."""
 
@@ -546,14 +496,12 @@ def main():
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # --- (Handlers) ---
-    application.add_handler(CommandHandler("iniciar", start))  # Renomeei para 'iniciar' para português
-    application.add_handler(MessageHandler(filters.VOICE, lidar_com_mensagem_de_voz))
+    application.add_handler(MessageHandler(filters.VOICE, lidar_com_audio_rejeitado))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lidar_com_mensagens_texto_geral))
     application.add_error_handler(lidar_erros)
 
     # Inicia o bot (polling)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
