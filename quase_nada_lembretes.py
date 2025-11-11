@@ -165,60 +165,108 @@ def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
 
 async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | None:
     """
-    Usa a Gemini API para extrair detalhes de um lembrete em linguagem natural.
-    Retorna um dicionário com 'title', 'time', 'date', 'recurrence', 'relative_seconds' ou None se falhar.
+    Usa a Gemini API para classificar a intenção e extrair detalhes de um lembrete.
+    Retorna um dicionário JSON com "intencao" e "dados".
     """
-    if not modelo_gemini_instancia:
-        logger.warning("Modelo Gemini não configurado. Não é possível extrair detalhes de lembretes inteligentes.")
+    if not modelo_gemini_instancia:  # Correção aqui
+        logger.warning("Modelo Gemini não configurado. Não é possível extrair detalhes.")
         return None
 
-    # Adiciona a data e hora atual ao prompt para "agora" ou "hoje"
     momento_atual = datetime.now(timezone.utc)
-    # Formato do prompt para a IA
     prompt_ia = f"""
-    Extraia as seguintes informações de um pedido de lembrete em português.
-    Formate a saída como um objeto JSON.
-    Se uma informação não for encontrada, use null.
+        Analise o pedido do usuário em português.
+        Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
 
-    Campos esperados:
-    - "titulo": (string) A ação ou o que deve ser lembrado. Ex: "comprar pão", "ligar para a Maria".
-    - "hora": (string, opcional) A hora no formato HH:MM (24 horas). Ex: "08:00", "14:30". Se for "agora" ou "imediatamente", use a hora atual (ex: {momento_atual.strftime('%H:%M')}). Se for "daqui X tempo", calcule a hora futura a partir de agora (ex: daqui 30 minutos é {(momento_atual + timedelta(minutes=30)).strftime('%H:%M')}).
-    - "data": (string, opcional) A data no formato AAAA-MM-DD. Ex: "2025-07-21". Se for "hoje", use {momento_atual.strftime('%Y-%m-%d')}. Se for "amanhã", use {(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}. Se for "próxima segunda", calcule a data da próxima segunda-feira.
-    - "recorrencia": (string, opcional) Se o lembrete se repete. Ex: "diário", "semanal", "mensal", "anual", "toda terça". Se não se repete, null.
-    - "segundos_relativos": (float, opcional) Se o lembrete é para "daqui X segundos/minutos/horas", o tempo em segundos. Ex: 300.
+        Formate a saída como um objeto JSON com "intencao" e "dados".
 
-    Exemplos:
-    "Me lembre de comprar pão amanhã às 7 da manhã."
-    {{ "titulo": "comprar pão", "hora": "07:00", "data": "{(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}", "recorrencia": null, "segundos_relativos": null }}
+        Campos esperados:
+        - "intencao": (string) "CRIAR_LEMBRETE", "LISTAR_LEMBRETES", ou "CHAT_GERAL".
+        - "dados": (object) Detalhes para CRIAR, ou null para as outras intenções.
 
-    "Lembre-me de ir à academia toda terça-feira às 18h."
-    {{ "titulo": "ir à academia", "hora": "18:00", "data": null, "recorrencia": "toda terça-feira", "segundos_relativos": null }}
+        Regras para "CRIAR_LEMBRETE":
+        1.  **Formato de Hora:** A "hora" DEVE ser estritamente no formato HH:MM (24 horas).
+        2.  **Ambiguidade AM/PM:** Se o usuário disser "às 2" ou "2h", assuma "02:00" (manhã). Se o usuário disser "2 da tarde" ou "14h", use "14:00".
+        3.  **Título:** A ação ou o que deve ser lembrado.
+        4.  **Data:** A data no formato AAAA-MM-DD. Se for "hoje", use {momento_atual.strftime('%Y-%m-%d')}. Se for "amanhã", use {(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}.
+        5.  **Recorrência:** Ex: "diário", "semanal", "toda terça".
+        6.  **Segundos Relativos:** Se for "daqui X segundos/minutos/horas", o tempo em segundos.
 
-    "Agendar lembrete para daqui 5 segundos para fazer algo."
-    {{ "titulo": "fazer algo", "hora": null, "data": null, "recorrencia": null, "segundos_relativos": 5.0 }}
+        ---
+        Exemplos:
 
-    "Me lembre em 30 minutos de tirar o bolo do forno."
-    {{ "titulo": "tirar o bolo do forno", "hora": null, "data": null, "recorrencia": null, "segundos_relativos": 1800.0 }}
+        Pedido: "Me lembra de algo 2h21"
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{
+            "titulo": "algo", 
+            "hora": "02:21", 
+            "data": null, 
+            "recorrencia": null, 
+            "segundos_relativos": null
+          }}
+        }}
 
-    "Lembre-me de pagar a conta dia 25."
-    {{ "titulo": "pagar a conta", "hora": null, "data": "{momento_atual.year}-{momento_atual.month}-25", "recorrencia": null, "segundos_relativos": null }}
+        Pedido: "Me lembra de algo às 2 da tarde"
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{
+            "titulo": "algo", 
+            "hora": "14:00", 
+            "data": null, 
+            "recorrencia": null, 
+            "segundos_relativos": null
+          }}
+        }}
 
-    "Lembrete para agora: reunião."
-    {{ "titulo": "reunião", "hora": "{momento_atual.strftime('%H:%M')}", "data": "{momento_atual.strftime('%Y-%m-%d')}", "recorrencia": null, "segundos_relativos": 0.0 }}
+        Pedido: "Me lembra de comprar pão amanhã às 7 da manhã."
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{
+            "titulo": "comprar pão", 
+            "hora": "07:00", 
+            "data": "{(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}", 
+            "recorrencia": null, 
+            "segundos_relativos": null
+          }} 
+        }}
 
-    Pedido: "{texto_usuario}"
-    """
+        Pedido: "Me lista os lembretes pendentes"
+        {{ 
+          "intencao": "LISTAR_LEMBRETES", 
+          "dados": null 
+        }}
+
+        Pedido: "oi tudo bem?"
+        {{ 
+          "intencao": "CHAT_GERAL", 
+          "dados": null 
+        }}
+
+        Pedido: "Me lembra em 30 minutos de tirar o bolo do forno."
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{
+            "titulo": "tirar o bolo do forno", 
+            "hora": null, 
+            "data": null, 
+            "recorrencia": null, 
+            "segundos_relativos": 1800.0
+          }} 
+        }}
+        ---
+
+        Pedido: "{texto_usuario}"
+        """
 
     try:
-        # Usa o modelo Gemini para gerar a resposta
-        sessao_chat = modelo_gemini_instancia.start_chat()
+        sessao_chat = modelo_gemini_instancia.start_chat(history=[])
         resposta = await sessao_chat.send_message_async(prompt_ia)
 
-        # Tenta parsear a resposta como JSON
         texto_resposta = resposta.text.strip()
-        # Remove blocos de código markdown se existirem (```json...```)
         if texto_resposta.startswith("```json") and texto_resposta.endswith("```"):
             texto_resposta = texto_resposta[7:-3].strip()
+
+        logger.info(f"Resposta bruta da IA para extração/classificação: {texto_resposta}")
 
         detalhes = json.loads(texto_resposta)
         return detalhes
@@ -231,26 +279,41 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         logger.error(f"Erro ao interagir com a Gemini API para extrair lembrete: {e}", exc_info=True)
         return None
 
-1# Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, ) -> None:
+# Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_transcrito: str = None) -> None:
     """
-    Lida com mensagens de texto que não são comandos.
-    Tenta extrair um lembrete usando a IA; se não conseguir, responde como IA de chat geral.
+    Lida com mensagens de texto/áudio.
+    Chama a IA para classificar a intenção (CRIAR, LISTAR, CHAT) e age de acordo.
     """
     id_chat = update.effective_message.chat_id
-    mensagem_usuario = update.effective_message.text  # Volta a pegar o texto diretamente
-
-    # Pré-processa a mensagem substituindo números por extenso
+    mensagem_usuario = texto_transcrito if texto_transcrito else update.effective_message.text
     mensagem_usuario_processada = substituir_numeros_por_extenso(mensagem_usuario)
+
+    if not modelo_gemini_instancia:
+        await update.effective_message.reply_text("Desculpe, a funcionalidade de IA está desativada.")
+        return
 
     await update.effective_message.reply_text("Processando sua solicitação com a IA...")
 
-    detalhes_lembrete = await extrair_detalhes_lembrete_com_gemini(mensagem_usuario_processada)
+    # 1. IA CLASSIFICA A INTENÇÃO
+    resposta_ia = await extrair_detalhes_lembrete_com_gemini(mensagem_usuario_processada)
 
-    if detalhes_lembrete and (detalhes_lembrete.get("segundos_relativos") is not None or
-                              detalhes_lembrete.get("hora") is not None or
-                              detalhes_lembrete.get("data") is not None or
-                              detalhes_lembrete.get("recorrencia") is not None):
+    if not resposta_ia:
+        await update.effective_message.reply_text("Desculpe, a IA não conseguiu processar sua solicitação.")
+        return
+
+    intencao = resposta_ia.get("intencao")
+    detalhes_lembrete = resposta_ia.get("dados")  # 'dados' agora contém o JSON do lembrete (ou null)
+
+    # --- 2. ROTEAMENTO BASEADO NA INTENÇÃO ---
+
+    # === INTENÇÃO: LISTAR LEMBRETES ===
+    if intencao == "LISTAR_LEMBRETES":
+        await listar_lembretes_pendentes(update, context)
+        return  # Termina aqui
+
+    # === INTENÇÃO: CRIAR LEMBRETE ===
+    elif intencao == "CRIAR_LEMBRETE" and detalhes_lembrete:
 
         titulo = detalhes_lembrete.get("titulo").upper()
         hora_str = detalhes_lembrete.get("hora")
@@ -258,149 +321,129 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
         recorrencia = detalhes_lembrete.get("recorrencia")
         segundos_relativos = detalhes_lembrete.get("segundos_relativos")
 
-        momento_agendamento = None
-
-        # --- (Início da lógica de cálculo de data/hora - SEM MUDANÇAS) ---
-        if segundos_relativos is not None:
-            try:
-                # Tempo relativo é sempre baseado no agora (UTC)
-                momento_agendamento = datetime.now(timezone.utc) + timedelta(seconds=float(segundos_relativos))
-            except ValueError:
-                await update.effective_message.reply_text(
-                    "Tempo relativo inválido. Por favor, use um número para segundos/minutos/horas.")
-                return
-        elif hora_str and data_str:
-            try:
-                # 1. Cria o datetime "naive" (sem fuso) a partir do que a IA extraiu
-                momento_local_naive = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M")
-                # 2. Localiza esse datetime no fuso de Brasília (torna "aware")
-                momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
-                # 3. Converte o momento de Brasília para UTC (para o JobQueue)
-                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
-            except ValueError:
-                await update.effective_message.reply_text(
-                    "Formato de data ou hora inválido. Tente AAAA-MM-DD HH:MM.")
-                return
-        elif hora_str:
-            try:
-                hora_parseada = datetime.strptime(hora_str, "%H:%M").time()
-                # Pega o "hoje" no fuso de Brasília
-                hoje_local = datetime.now(FUSO_HORARIO_LOCAL).date()
-                # Combina a data de hoje (Brasília) com a hora (Brasília)
-                momento_local_naive = datetime.combine(hoje_local, hora_parseada)
-                # Localiza no fuso de Brasília
-                momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
-                # Converte para UTC
-                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
-
-                # Se a hora já passou HOJE (comparando em UTC), agenda para amanhã
-                if momento_agendamento < datetime.now(timezone.utc):
-                    momento_agendamento += timedelta(days=1)
-            except ValueError:
-                await update.effective_message.reply_text("Formato de hora inválido. Tente HH:MM.")
-                return
-        elif data_str:
-            try:
-                # Assume 00:00 daquele dia no fuso local
-                data_local_naive = datetime.strptime(data_str, "%Y-%m-%d")
-                momento_local_aware = FUSO_HORARIO_LOCAL.localize(data_local_naive)
-                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
-            except ValueError:
-                await update.effective_message.reply_text("Formato de data inválido. Tente AAAA-MM-DD.")
-                return
-
-        if momento_agendamento and momento_agendamento < datetime.now(timezone.utc):
-            await update.effective_message.reply_text(
-                "Não consigo agendar lembretes no passado. Por favor, forneça uma data/hora futura.")
-            return
-            # --- (Fim da lógica de cálculo de data/hora) ---
-
-        if not titulo:
-            titulo = "Lembrete Geral"
-
-        intervalo = intervalo_recorrencia_em_segundos(recorrencia)
-
-        # (Você tinha a remoção de tarefas antigas aqui, vou manter)
-        tarefa_removida = remover_tarefas_antigas(str(id_chat), context)
-
-        if intervalo or momento_agendamento:
-
-            # Determina a primeira execução (em UTC)
-            if intervalo:
-                primeira_execucao_utc = momento_agendamento if momento_agendamento else datetime.now(
-                    timezone.utc) + timedelta(seconds=intervalo)
-            else:
-                primeira_execucao_utc = momento_agendamento
-
-            # 2. SALVAR NO BANCO DE DADOS
-            sessao = SessionLocal()
-            try:
-                novo_lembrete = Lembrete(
-                    chat_id=id_chat,
-                    titulo=titulo,
-                    proxima_execucao=primeira_execucao_utc,
-                    intervalo_segundos=intervalo,
-                    recorrencia_str=recorrencia
-                )
-                sessao.add(novo_lembrete)
-                sessao.commit()
-                id_db = novo_lembrete.id
-                logger.info(f"Lembrete salvo no DB com ID: {id_db}")
-            except Exception as e:
-                logger.error(f"Erro ao salvar lembrete no DB: {e}", exc_info=True)
-                sessao.rollback()
-                await update.effective_message.reply_text("Erro ao salvar o lembrete no banco de dados.")
-                return
-            finally:
-                sessao.close()
-
-            # 3. AGENDAR NO JOBQUEUE
-            context.job_queue.run_once(
-                disparar_alarme,
-                when=primeira_execucao_utc,
-                chat_id=id_chat,
-                name=str(id_db),
-                data={"titulo": titulo, "id_db": id_db}
-            )
-
-            # 4. RESPONDER AO USUÁRIO (COM FUSO CORRIGIDO E NOVO FORMATO)
-
-            # Converte o UTC de volta para Brasília (FUSO_HORARIO_LOCAL) para exibir
-            momento_agendamento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
-            # Formato mais amigável: 11/11/2025 às 10:00
-            data_formatada = momento_agendamento_local.strftime('%d/%m/%Y às %H:%M')
-
-            texto_html = ""  # Mudei para texto_html
-
-            if intervalo:
-                # --- NOVO FORMATO DA MENSAGEM RECORRENTE ---
-                texto_html = (
-                    "<b>🔴 AGENDAMENTO RECORRENTE</b>\n\n"
-                    f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b> (Horário de Brasília)."
-                    f"\nRecorrência: <b>{recorrencia}</b>"
-                )
-            else:
-                # --- NOVO FORMATO DA MENSAGEM ÚNICA ---
-                texto_html = (
-                    "<b>🔴 AGENDAMENTO</b>\n\n"
-                    f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
-                )
-
-            if tarefa_removida:
-                texto_html += "\n\n<i>(Lembrete anterior removido.)</i>"
-
-            await update.effective_message.reply_html(texto_html)  # Usar reply_html
-
+        # Verifica se a IA realmente extraiu alguma informação de tempo
+        if not (segundos_relativos is not None or hora_str or data_str or recorrencia):
+            # Se a IA achou que era CRIAR, mas não achou data/hora, cai no CHAT GERAL
+            pass  # Deixa cair para o CHAT_GERAL no final
         else:
-            await update.effective_message.reply_text(
-                "Desculpe, a IA entendeu sua intenção de lembrete, mas não conseguiu determinar um tempo ou data específicos para agendar."
-            )
+            # --- Início da Lógica de Agendamento (copiada de antes) ---
+            momento_agendamento = None
 
-    else:
-        # Se não é um lembrete, responde como IA de chat geral
-        resposta_ai = await obter_resposta_gemini(mensagem_usuario)
-        await update.effective_message.reply_text(resposta_ai)
+            if segundos_relativos is not None:
+                try:
+                    momento_agendamento = datetime.now(timezone.utc) + timedelta(seconds=float(segundos_relativos))
+                except ValueError:
+                    await update.effective_message.reply_text("Tempo relativo inválido. Por favor, use um número.")
+                    return
+            elif hora_str and data_str:
+                try:
+                    momento_local_naive = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M")
+                    momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
+                    momento_agendamento = momento_local_aware.astimezone(timezone.utc)
+                except ValueError:
+                    await update.effective_message.reply_text(
+                        "Formato de data ou hora inválido. Tente AAAA-MM-DD HH:MM.")
+                    return
+            elif hora_str:
+                try:
+                    hora_parseada = datetime.strptime(hora_str, "%H:%M").time()
+                    hoje_local = datetime.now(FUSO_HORARIO_LOCAL).date()
+                    momento_local_naive = datetime.combine(hoje_local, hora_parseada)
+                    momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
+                    momento_agendamento = momento_local_aware.astimezone(timezone.utc)
+                    if momento_agendamento < datetime.now(timezone.utc):
+                        momento_agendamento += timedelta(days=1)
+                except ValueError:
+                    await update.effective_message.reply_text("Formato de hora inválido. Tente HH:MM.")
+                    return
+            elif data_str:
+                try:
+                    data_local_naive = datetime.strptime(data_str, "%Y-%m-%d")
+                    momento_local_aware = FUSO_HORARIO_LOCAL.localize(data_local_naive)
+                    momento_agendamento = momento_local_aware.astimezone(timezone.utc)
+                except ValueError:
+                    await update.effective_message.reply_text("Formato de data inválido. Tente AAAA-MM-DD.")
+                    return
 
+            if momento_agendamento and momento_agendamento < datetime.now(timezone.utc):
+                await update.effective_message.reply_text("Não consigo agendar lembretes no passado.")
+                return
+
+            if not titulo:
+                titulo = "Lembrete Geral"
+
+            intervalo = intervalo_recorrencia_em_segundos(recorrencia)
+            tarefa_removida = remover_tarefas_antigas(str(id_chat), context)
+
+            if intervalo or momento_agendamento:
+                if intervalo:
+                    primeira_execucao_utc = momento_agendamento if momento_agendamento else datetime.now(
+                        timezone.utc) + timedelta(seconds=intervalo)
+                else:
+                    primeira_execucao_utc = momento_agendamento
+
+                # SALVAR NO BANCO DE DADOS
+                sessao = SessionLocal()
+                try:
+                    novo_lembrete = Lembrete(
+                        chat_id=id_chat,
+                        titulo=titulo,
+                        proxima_execucao=primeira_execucao_utc,
+                        intervalo_segundos=intervalo,
+                        recorrencia_str=recorrencia
+                    )
+                    sessao.add(novo_lembrete)
+                    sessao.commit()
+                    id_db = novo_lembrete.id
+                    logger.info(f"Lembrete salvo no DB com ID: {id_db}")
+                except Exception as e:
+                    logger.error(f"Erro ao salvar lembrete no DB: {e}", exc_info=True)
+                    sessao.rollback()
+                    await update.effective_message.reply_text("Erro ao salvar o lembrete no banco de dados.")
+                    return
+                finally:
+                    sessao.close()
+
+                # AGENDAR NO JOBQUEUE
+                context.job_queue.run_once(
+                    disparar_alarme,
+                    when=primeira_execucao_utc,
+                    chat_id=id_chat,
+                    name=str(id_db),
+                    data={"titulo": titulo, "id_db": id_db}
+                )
+
+                # RESPONDER AO USUÁRIO
+                momento_agendamento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
+                data_formatada = momento_agendamento_local.strftime('%d/%m/%Y às %H:%M')
+                texto_html = ""
+
+                if intervalo:
+                    texto_html = (
+                        "<b>🟢​ LEMBRETE RECORRENTE</b>\n\n"
+                        f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
+                        f"\nRecorrência: <b>{recorrencia}</b>"
+                    )
+                else:
+                    texto_html = (
+                        "<b>🟢​ LEMBRETE</b>\n\n"
+                        f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
+                    )
+
+                if tarefa_removida:
+                    texto_html += "\n\n<i>(Lembrete anterior removido.)</i>"
+
+                await update.effective_message.reply_html(texto_html)
+                return  # Termina aqui
+
+            else:
+                # Se a IA achou que era CRIAR, mas não conseguiu data/hora/intervalo
+                pass  # Deixa cair para o CHAT_GERAL
+
+    # === INTENÇÃO: CHAT GERAL (ou se os outros falharem) ===
+    # Se intencao == "CHAT_GERAL" ou se intencao == "CRIAR_LEMBRETE" mas falhou em extrair dados
+    resposta_ai = await obter_resposta_gemini(mensagem_usuario)
+    await update.effective_message.reply_text(resposta_ai)
 
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme. Agora ele interage com o banco de dados."""
@@ -411,7 +454,7 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     # --- INÍCIO DA MUDANÇA (Enviar 3 vezes) ---
 
     # Define a mensagem (usando HTML para o negrito que você pediu)
-    texto_lembrete_html = f"<b>🔴 LEMBRETE</b>\n\n<b>\"{titulo}\"</b>"
+    texto_lembrete_html = f"<b>🟠​ LEMBRETE</b>\n<b>\"{titulo}\"</b>"
 
     # Loop para enviar a mensagem 3 vezes
     for i in range(3):
@@ -469,6 +512,49 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Erro ao processar disparo de alarme no DB para ID {id_db}: {e}", exc_info=True)
         sessao.rollback()
+    finally:
+        sessao.close()
+
+async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Busca no DB e lista os lembretes pendentes para o usuário."""
+
+    id_chat = update.effective_message.chat_id
+    logger.info(f"Executando ação: Listar lembretes para o chat_id: {id_chat}")
+
+    sessao = SessionLocal()
+    try:
+        agora_utc = datetime.now(timezone.utc)
+        lembretes_pendentes = sessao.query(Lembrete).filter(
+            Lembrete.chat_id == id_chat,
+            Lembrete.proxima_execucao > agora_utc
+        ).order_by(Lembrete.proxima_execucao.asc()).all()
+
+        if not lembretes_pendentes:
+            await update.effective_message.reply_text("Você não tem nenhum lembrete pendente agendado. 👍")
+            return
+
+        resposta_html = ["<b>🔵​ LEMBRETES PENDENTES:</b>\n"]
+
+        for lembrete in lembretes_pendentes:
+            momento_local = lembrete.proxima_execucao.astimezone(FUSO_HORARIO_LOCAL)
+            data_formatada = momento_local.strftime('%d/%m/%Y às %H:%M')
+
+            recorrencia_info = ""
+            if lembrete.recorrencia_str:
+                recorrencia_info = f" <i>(Recorrência: {lembrete.recorrencia_str})</i>"
+
+            resposta_html.append(
+                "\n----------------------"
+                f"\n<b>\"{lembrete.titulo}\"</b>\n"
+                f"  <b>Data:</b> {data_formatada}{recorrencia_info}\n"
+                "----------------------"
+            )
+
+        await update.effective_message.reply_html("\n".join(resposta_html))
+
+    except Exception as e:
+        logger.error(f"Erro ao listar lembretes do DB para o chat_id {id_chat}: {e}", exc_info=True)
+        await update.effective_message.reply_text("Ocorreu um erro ao tentar buscar seus lembretes.")
     finally:
         sessao.close()
 
