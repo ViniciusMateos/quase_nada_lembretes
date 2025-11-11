@@ -1,5 +1,6 @@
 import asyncio
 import os
+import asyncio
 from number_parser import parse_ordinal, parse_number
 from dotenv import load_dotenv
 import logging
@@ -81,10 +82,9 @@ async def lidar_com_audio_rejeitado(update: Update, context: ContextTypes.DEFAUL
 
     # Vamos usar HTML para colocar a primeira linha em negrito
     texto_html = (
-        "🚫\n"
+        "🔴​<b>AVISO</b>\n\n"
         "Só consigo processar lembretes por mensagem de <B>TEXTO</b>.\n"
         "Por favor, <b>DIGITE</b> o que você precisa."
-        "\n🚫"
     )
 
     # Usamos reply_html para que o Telegram entenda a tag <b>
@@ -252,7 +252,7 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                               detalhes_lembrete.get("data") is not None or
                               detalhes_lembrete.get("recorrencia") is not None):
 
-        titulo = detalhes_lembrete.get("titulo")
+        titulo = detalhes_lembrete.get("titulo").upper()
         hora_str = detalhes_lembrete.get("hora")
         data_str = detalhes_lembrete.get("data")
         recorrencia = detalhes_lembrete.get("recorrencia")
@@ -263,6 +263,7 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
         # --- (Início da lógica de cálculo de data/hora - SEM MUDANÇAS) ---
         if segundos_relativos is not None:
             try:
+                # Tempo relativo é sempre baseado no agora (UTC)
                 momento_agendamento = datetime.now(timezone.utc) + timedelta(seconds=float(segundos_relativos))
             except ValueError:
                 await update.effective_message.reply_text(
@@ -312,28 +313,24 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
             await update.effective_message.reply_text(
                 "Não consigo agendar lembretes no passado. Por favor, forneça uma data/hora futura.")
             return
-        # --- (Fim da lógica de cálculo de data/hora) ---
+            # --- (Fim da lógica de cálculo de data/hora) ---
 
         if not titulo:
             titulo = "Lembrete Geral"
 
         intervalo = intervalo_recorrencia_em_segundos(recorrencia)
 
-        # --- (Início da lógica de persistência e agendamento - MUDANÇA CRÍTICA) ---
-
-        # 1. REMOVER TAREFAS ANTIGAS (OPCIONAL, mas recomendado se você não quiser múltiplos lembretes)
-        # Se você quiser que o usuário possa agendar VÁRIOS lembretes, remova esta linha.
-        # Se quiser que um novo lembrete apague o antigo (para o mesmo chat_id), mantenha:
-        remover_tarefas_antigas(str(id_chat), context)  # Vamos criar essa função
+        # (Você tinha a remoção de tarefas antigas aqui, vou manter)
+        tarefa_removida = remover_tarefas_antigas(str(id_chat), context)
 
         if intervalo or momento_agendamento:
 
-            # Determina a primeira execução
+            # Determina a primeira execução (em UTC)
             if intervalo:
-                primeira_execucao = momento_agendamento if momento_agendamento else datetime.now(
+                primeira_execucao_utc = momento_agendamento if momento_agendamento else datetime.now(
                     timezone.utc) + timedelta(seconds=intervalo)
             else:
-                primeira_execucao = momento_agendamento
+                primeira_execucao_utc = momento_agendamento
 
             # 2. SALVAR NO BANCO DE DADOS
             sessao = SessionLocal()
@@ -341,13 +338,13 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 novo_lembrete = Lembrete(
                     chat_id=id_chat,
                     titulo=titulo,
-                    proxima_execucao=primeira_execucao,
+                    proxima_execucao=primeira_execucao_utc,
                     intervalo_segundos=intervalo,
                     recorrencia_str=recorrencia
                 )
                 sessao.add(novo_lembrete)
                 sessao.commit()
-                id_db = novo_lembrete.id  # Pega o ID que o banco gerou
+                id_db = novo_lembrete.id
                 logger.info(f"Lembrete salvo no DB com ID: {id_db}")
             except Exception as e:
                 logger.error(f"Erro ao salvar lembrete no DB: {e}", exc_info=True)
@@ -358,38 +355,52 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 sessao.close()
 
             # 3. AGENDAR NO JOBQUEUE
-            # Usamos o ID do banco como o 'name' do job, para ligar os dois
             context.job_queue.run_once(
                 disparar_alarme,
-                when=primeira_execucao,
+                when=primeira_execucao_utc,
                 chat_id=id_chat,
-                name=str(id_db),  # MUITO IMPORTANTE: usar o ID do DB
-                data={"titulo": titulo, "id_db": id_db}  # Passa o ID do DB e o título
+                name=str(id_db),
+                data={"titulo": titulo, "id_db": id_db}
             )
 
-            # 4. RESPONDER AO USUÁRIO
-            fuso_horario_local_offset = timedelta(hours=-3)  # Fuso de SP
-            momento_agendamento_local = (primeira_execucao + fuso_horario_local_offset)
+            # 4. RESPONDER AO USUÁRIO (COM FUSO CORRIGIDO E NOVO FORMATO)
 
-            texto_resposta = ""
+            # Converte o UTC de volta para Brasília (FUSO_HORARIO_LOCAL) para exibir
+            momento_agendamento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
+            # Formato mais amigável: 11/11/2025 às 10:00
+            data_formatada = momento_agendamento_local.strftime('%d/%m/%Y às %H:%M')
+
+            texto_html = ""  # Mudei para texto_html
+
             if intervalo:
-                texto_resposta = f"Lembrete '{titulo}' agendado para repetir a cada {recorrencia}."
-                texto_resposta += f" A primeira execução será em {momento_agendamento_local.strftime('%Y-%m-%d %H:%M')}!"
+                # --- NOVO FORMATO DA MENSAGEM RECORRENTE ---
+                texto_html = (
+                    "<b>🔴 AGENDAMENTO RECORRENTE</b>\n\n"
+                    f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b> (Horário de Brasília)."
+                    f"\nRecorrência: <b>{recorrencia}</b>"
+                )
             else:
-                texto_resposta = f"Lembrete '{titulo}' agendado para {momento_agendamento_local.strftime('%Y-%m-%d %H:%M')}!"
+                # --- NOVO FORMATO DA MENSAGEM ÚNICA ---
+                texto_html = (
+                    "<b>🔴 AGENDAMENTO</b>\n\n"
+                    f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
+                )
 
-            await update.effective_message.reply_text(texto_resposta)
+            if tarefa_removida:
+                texto_html += "\n\n<i>(Lembrete anterior removido.)</i>"
+
+            await update.effective_message.reply_html(texto_html)  # Usar reply_html
 
         else:
             await update.effective_message.reply_text(
                 "Desculpe, a IA entendeu sua intenção de lembrete, mas não conseguiu determinar um tempo ou data específicos para agendar."
             )
-        # --- (Fim da lógica de persistência) ---
 
     else:
         # Se não é um lembrete, responde como IA de chat geral
         resposta_ai = await obter_resposta_gemini(mensagem_usuario)
         await update.effective_message.reply_text(resposta_ai)
+
 
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme. Agora ele interage com o banco de dados."""
@@ -397,7 +408,28 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     id_db = tarefa.name  # Pegamos o ID do banco de dados que salvamos como 'name'
     titulo = tarefa.data.get("titulo", "Lembrete")
 
-    await context.bot.send_message(tarefa.chat_id, text=f"Opa! Lembrete: {titulo}")
+    # --- INÍCIO DA MUDANÇA (Enviar 3 vezes) ---
+
+    # Define a mensagem (usando HTML para o negrito que você pediu)
+    texto_lembrete_html = f"<b>🔴 LEMBRETE</b>\n\n<b>\"{titulo}\"</b>"
+
+    # Loop para enviar a mensagem 3 vezes
+    for i in range(3):
+        try:
+            await context.bot.send_message(
+                tarefa.chat_id,
+                text=texto_lembrete_html,
+                parse_mode="HTML"  # Necessário para o <b> funcionar
+            )
+
+            # Se não for a última mensagem, espera 2 segundos
+            if i < 2:
+                await asyncio.sleep(1)  # Espera 2 segundos
+
+        except Exception as e:
+            logger.error(f"Erro ao enviar lembrete (tentativa {i + 1}): {e}", exc_info=True)
+            # Se falhar o envio, espera 1s e tenta o próximo
+            await asyncio.sleep(1)
 
     sessao = SessionLocal()
     try:
