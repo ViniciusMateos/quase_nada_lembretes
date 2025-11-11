@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 import logging
 from telegram import Update
 from pytz import timezone as pytz_timezone  # Mais confiável para fusos horários
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, ApplicationBuilder
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, \
+    ApplicationBuilder
 import re
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted # <<< ADICIONE ESTA LINHA
+# --- MUDANÇA: Importa os dois tipos de erro 429 ---
+from google.api_core.exceptions import ResourceExhausted, TooManyRequests
 import json
 from datetime import datetime, timedelta, timezone
 import sqlalchemy
@@ -18,6 +20,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 from keep_alive import keep_alive
 import psycopg2
+
 keep_alive()  # isso inicia o servidor web fake
 
 # Carrega as variáveis de ambiente do arquivo .env
@@ -44,6 +47,7 @@ engine = create_engine(DATABASE_URL, poolclass=NullPool)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 
+
 # --- Definição da Tabela de Lembretes (NOVO) ---
 class Lembrete(Base):
     __tablename__ = "lembretes"
@@ -51,33 +55,105 @@ class Lembrete(Base):
     chat_id = Column(BigInteger, nullable=False)
     titulo = Column(String, nullable=False)
     proxima_execucao = Column(DateTime(timezone=True), nullable=False)
-    intervalo_segundos = Column(Integer, nullable=True) # 0 para único, > 0 para recorrente
-    recorrencia_str = Column(String, nullable=True) # Para exibir (ex: "diário")
+    intervalo_segundos = Column(Integer, nullable=True)  # 0 para único, > 0 para recorrente
+    recorrencia_str = Column(String, nullable=True)  # Para exibir (ex: "diário")
+
 
 # Cria a tabela se ela não existir
 Base.metadata.create_all(engine)
-
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-modelo_gemini_instancia = None # Inicializa a instância como None por padrão
+# --- NOVO: Configuração de Modelos Gemini e Fallback ---
+MODELOS_DISPONIVEIS = [
+    "models/gemini-flash-lite-latest",
+    "models/gemini-2.5-flash-lite",
+    "models/gemini-2.0-flash-lite-001",
+    "models/gemini-2.5-flash-lite-preview-09-2025",
+    "models/gemini-2.5-flash-lite-preview-06-17",
+    "models/gemini-2.0-flash-lite-preview-02-05",
+    "models/gemini-2.0-flash-lite-preview",
+    "gemini-2.0-flash-lite"
+
+    # --- FALLBACKS "FLASH" (MÉDIOS) ---
+    # Se todos os "Lite" falharem, ele passa para os Flash normais:
+
+    "models/gemini-flash-latest",  # 8ª TENTATIVA: O "latest" do Flash normal
+    "models/gemini-2.5-flash",  # 9ª TENTATIVA: O 2.5 Flash estável
+    "models/gemini-2.0-flash",  # 10ª TENTATIVA: O 2.0 Flash estável
+    "models/gemini-2.0-flash-001",
+    "models/gemini-2.5-flash-preview-09-2025",  # Previews do Flash
+    "models/gemini-2.5-flash-preview-05-20",
+    "models/gemini-2.0-flash-exp",
+
+    # --- FALLBACKS "PRO" (MAIS PESADOS / EMERGÊNCIA) ---
+    # Se TUDO acima falhar, ele tenta os modelos "Pro" como último recurso:
+
+    "models/gemini-pro-latest",  # 15ª TENTATIVA: O "latest" Pro
+    "models/gemini-2.5-pro",  # 16ª TENTATIVA: O 2.5 Pro estável
+    "models/gemini-2.5-pro-preview-06-05",  # Previews do Pro
+    "models/gemini-2.5-pro-preview-05-06",
+    "models/gemini-2.5-pro-preview-03-25",
+    "models/gemini-2.0-pro-exp",
+    "models/gemini-2.0-pro-exp-02-05"
+]
+
+INDICE_MODELO_ATUAL = 0
+modelo_gemini_instancia = None  # Inicializa a instância como None por padrão
 
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        modelo_gemini = "gemini-2.0-flash-lite" # Nome recomendado para flash-lite
-        modelo_gemini_instancia = genai.GenerativeModel(modelo_gemini)
-        logger.info(f"Modelo Gemini '{modelo_gemini}' inicializado com sucesso.")
+        # --- MUDANÇA: Carrega o primeiro modelo da lista ---
+        modelo_nome_inicial = MODELOS_DISPONIVEIS[INDICE_MODELO_ATUAL]
+        modelo_gemini_instancia = genai.GenerativeModel(modelo_nome_inicial)
+        logger.info(f"Modelo Gemini inicial '{modelo_nome_inicial}' carregado.")
     except Exception as e:
-        logger.error(f"ERRO AO INICIALIZAR MODELO GEMINI: {e}", exc_info=True)
+        logger.error(f"ERRO AO INICIALIZAR MODELO GEMINI INICIAL: {e}", exc_info=True)
         # Se houver erro, modelo_gemini_instancia permanece None, e será tratado nas funções
 else:
     logger.warning("GEMINI_API_KEY não encontrada no arquivo .env. Funcionalidades da IA desativadas.")
 
+
 # --- Funções do Bot ---
+
+# --- NOVA FUNÇÃO: Lógica de Troca de Modelo ---
+def tentar_trocar_modelo_gemini() -> bool:
+    """
+    Tenta mudar para o próximo modelo Gemini da lista quando o atual se esgota (ResourceExhausted).
+    Usa variáveis globais para rastrear o estado.
+    Retorna True se a troca foi bem-sucedida, False se não há mais modelos.
+    """
+    global modelo_gemini_instancia, INDICE_MODELO_ATUAL, MODELOS_DISPONIVEIS
+
+    modelo_antigo = MODELOS_DISPONIVEIS[INDICE_MODELO_ATUAL]
+    logger.warning(f"Recurso esgotado (ResourceExhausted) detectado para o modelo: {modelo_antigo}")
+
+    INDICE_MODELO_ATUAL += 1  # Tenta o próximo modelo
+
+    if INDICE_MODELO_ATUAL >= len(MODELOS_DISPONIVEIS):
+        logger.error("TODOS OS MODELOS GEMINI (QUOTAS) ESTÃO ESGOTADOS. Desativando IA.")
+        modelo_gemini_instancia = None  # Desativa a IA
+        return False  # Falhou, não há mais modelos
+
+    # Tenta carregar o próximo modelo
+    try:
+        novo_modelo_nome = MODELOS_DISPONIVEIS[INDICE_MODELO_ATUAL]
+        modelo_gemini_instancia = genai.GenerativeModel(novo_modelo_nome)
+        logger.warning(f"SUCESSO NA TROCA DE QUOTA: Modelo '{novo_modelo_nome}' está agora ativo.")
+        return True  # Sucesso na troca
+    except Exception as e:
+        logger.error(f"Falha ao tentar ativar o modelo de fallback '{novo_modelo_nome}': {e}", exc_info=True)
+        # Chama recursivamente para tentar o PRÓXIMO da lista
+        return tentar_trocar_modelo_gemini()
+
+
+# --- FIM DA NOVA FUNÇÃO ---
+
+
 async def lidar_com_audio_rejeitado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Informa ao usuário que mensagens de áudio não são mais aceitas."""
 
@@ -91,8 +167,6 @@ async def lidar_com_audio_rejeitado(update: Update, context: ContextTypes.DEFAUL
     # Usamos reply_html para que o Telegram entenda a tag <b>
     await update.message.reply_html(texto_html)
 
-    # Usamos reply_html para que o Telegram entenda a tag <center>
-    await update.message.reply_html(texto_html)
 
 # Função para lidar com erros
 async def lidar_erros(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,6 +178,7 @@ async def lidar_erros(update: object, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         # Quando o erro não tem um effective_message (ex: erro em job), só logamos.
         logger.error("Erro fora de contexto de mensagem (provavelmente em um job): %s", str(context.error))
+
 
 def substituir_numeros_por_extenso(texto: str) -> str:
     palavras = texto.split()
@@ -121,29 +196,54 @@ def substituir_numeros_por_extenso(texto: str) -> str:
 
     return ' '.join(resultado)
 
+
 async def obter_resposta_gemini(prompt: str) -> str:
     """Envia um prompt para o modelo Gemini e retorna a resposta de texto."""
     if not modelo_gemini_instancia:
-        return "Desculpe, a IA para conversa geral não está configurada. Verifique a chave de API."
+        return "Desculpe, a IA para conversa geral não está configurada ou todos os modelos se esgotaram."
     try:
         sessao_chat = modelo_gemini_instancia.start_chat(history=[])
         resposta = await sessao_chat.send_message_async(prompt)
         return resposta.text
 
-    # --- INÍCIO DA TRATATIVA DO 429 ---
+    # --- INÍCIO DA TRATATIVA CORRIGIDA ---
+    # PRIMEIRO O MAIS ESPECÍFICO (QUOTA)
     except ResourceExhausted as e:
-        logger.error(f"Erro 429 (ResourceExhausted) ao obter resposta geral: {e}", exc_info=True)
-        # O limite padrão do Gemini 1.5 Flash é 15 RPM (Requisições por Minuto)
+        logger.error(f"Erro 429 (ResourceExhausted) em obter_resposta_gemini: {e}", exc_info=True)
+        # Este é o ESGOTAMENTO DE QUOTA. Precisa trocar o modelo.
+
+        if tentar_trocar_modelo_gemini():
+            # Se a troca deu certo, avisa o usuário para tentar de novo
+            return (
+                "🚫​ <b>Quota da IA Esgotada (Erro 429)</b> 🚫\n\n"
+                "O modelo de IA que estávamos usando atingiu sua quota (ResourceExhausted).\n"
+                "Eu <b>troquei para um modelo de fallback</b>.\n\n"
+                "Por favor, <b>envie sua mensagem novamente</b>."
+            )
+        else:
+            # Se a troca falhou (todos esgotados)
+            return (
+                "🚫​ <b>TODAS AS QUOTAS ESGOTADAS (Erro 429)</b> 🚫\n\n"
+                "Todos os modelos de IA disponíveis atingiram suas quotas.\n"
+                "A funcionalidade de IA está temporariamente desativada.\n"
+                "Por favor, tente novamente mais tarde."
+            )
+
+    # DEPOIS O MAIS GERAL (LIMITE DE TAXA)
+    except TooManyRequests as e:
+        logger.warning(f"Erro 429 (TooManyRequests) ao obter resposta geral: {e}", exc_info=True)
+        # Este é o LIMITE DE TAXA (ex: 15 RPM). Só precisa esperar.
         return (
-            "🚫​ <b>Limite da IA Atingido (Erro 429)</b> 🚫\n\n"
-            "Muitas solicitações foram feitas muito rápido.\n"
+            "🚫​ <b>Limite de Taxa Atingido (Erro 429)</b> 🚫\n\n"
+            "Muitas solicitações foram feitas muito rápido (TooManyRequests).\n"
             "Por favor, <b>aguarde cerca de 1 minuto</b> antes de tentar novamente."
         )
-    # --- FIM DA TRATATIVA DO 429 ---
+    # --- FIM DA TRATATIVA CORRIGIDA ---
 
     except Exception as e:
         logger.error(f"Erro ao interagir com a Gemini API em obter_resposta_gemini: {e}", exc_info=True)
         return "Desculpe, não consegui processar sua solicitação de conversa no momento."
+
 
 def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
     if not recorrencia:
@@ -172,6 +272,7 @@ def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
 
     return None
 
+
 async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | None:
     """
     Usa a Gemini API para classificar a intenção e extrair detalhes de um lembrete.
@@ -182,6 +283,7 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         return None
 
     momento_atual = datetime.now(timezone.utc)
+    # ... (O prompt_ia gigante continua o mesmo, não precisa copiar daqui)
     prompt_ia = f"""
             Analise o pedido do usuário em português.
             Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
@@ -266,7 +368,7 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
 
             Pedido: "{texto_usuario}"
             """
-
+    # ... (Fim do prompt_ia)
     try:
         sessao_chat = modelo_gemini_instancia.start_chat(history=[])
         resposta = await sessao_chat.send_message_async(prompt_ia)
@@ -280,12 +382,25 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         detalhes = json.loads(texto_resposta)
         return detalhes
 
-    # --- INÍCIO DA TRATATIVA DO 429 ---
+    # --- INÍCIO DA TRATATIVA CORRIGIDA ---
+    # PRIMEIRO O MAIS ESPECÍFICO (QUOTA)
     except ResourceExhausted as e:
         logger.error(f"Erro 429 (ResourceExhausted) ao extrair lembrete: {e}", exc_info=True)
-        # Retorna um JSON "falso" que o handler principal vai entender como erro
-        return {"intencao": "ERRO_429"}
-    # --- FIM DA TRATATIVA DO 429 ---
+        # Esgotamento de quota. Tenta trocar.
+
+        if tentar_trocar_modelo_gemini():
+            # Se a troca deu certo, retorna um erro especial
+            return {"intencao": "ERRO_429_TROCA_MODELO"}
+        else:
+            # Se todos falharam, retorna o erro de quota esgotada
+            return {"intencao": "ERRO_429_QUOTA_ESGOTADA"}
+
+    # DEPOIS O MAIS GERAL (LIMITE DE TAXA)
+    except TooManyRequests as e:
+        logger.warning(f"Erro 429 (TooManyRequests) ao extrair lembrete: {e}", exc_info=True)
+        # Limite de taxa (RPM). O handler vai tratar como "ERRO_429_RATE_LIMIT"
+        return {"intencao": "ERRO_429_RATE_LIMIT"}
+    # --- FIM DA TRATATIVA CORRIGIDA ---
 
     except json.JSONDecodeError as e:
         logger.error(
@@ -296,8 +411,10 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         logger.error(f"Erro ao interagir com a Gemini API para extrair lembrete: {e}", exc_info=True)
         return None
 
+
 # Handler para lidar com mensagens que não foram capturadas por outros handlers (conversa geral)
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_transcrito: str = None) -> None:
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                          texto_transcrito: str = None) -> None:
     """
     Lida com mensagens de texto/áudio.
     Chama a IA para classificar a intenção (CRIAR, LISTAR, CHAT) e age de acordo.
@@ -307,7 +424,8 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     mensagem_usuario_processada = substituir_numeros_por_extenso(mensagem_usuario)
 
     if not modelo_gemini_instancia:
-        await update.effective_message.reply_text("Desculpe, a funcionalidade de IA está desativada.")
+        await update.effective_message.reply_text(
+            "Desculpe, a funcionalidade de IA está desativada (nenhum modelo carregado ou todos esgotados).")
         return
 
     await update.effective_message.reply_text("Processando sua solicitação com a IA...")
@@ -322,17 +440,36 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     intencao = resposta_ia.get("intencao")
     detalhes_lembrete = resposta_ia.get("dados")  # 'dados' agora contém o JSON do lembrete (ou null)
 
+    # --- 2. ROTEAMENTO BASEADO NA INTENÇÃO (MUDANÇA AQUI) ---
 
-
-    # --- 2. ROTEAMENTO BASEADO NA INTENÇÃO ---
-
-    # === TRATATIVA DO ERRO 429 (LIMITE DE RPM) ===
-    if intencao == "ERRO_429":
+    # === TRATATIVA DO ERRO 429 (TROCA DE MODELO BEM-SUCEDIDA) ===
+    if intencao == "ERRO_429_TROCA_MODELO":
         mensagem_erro = (
-            "🚫​ <b>Limite da IA Atingido (Erro 429)</b> 🚫\n\n"
-            "Muitas solicitações foram feitas muito rápido.\n"
-            "De acordo com a documentação, o limite do modelo Flash é de <b>15 requisições por minuto</b>.\n\n"
+            "🚫​ <b>Quota da IA Esgotada (Erro 429)</b> 🚫\n\n"
+            "O modelo de IA que processa lembretes atingiu sua quota (ResourceExhausted).\n"
+            "Eu <b>troquei para um modelo de fallback</b>.\n\n"
+            "Por favor, <b>envie sua mensagem novamente</b>."
+        )
+        await update.effective_message.reply_html(mensagem_erro)
+        return  # Termina aqui
+
+    # === TRATATIVA DO ERRO 429 (LIMITE DE TAXA / RPM) ===
+    elif intencao == "ERRO_429_RATE_LIMIT":
+        mensagem_erro = (
+            "🚫​ <b>Limite de Taxa Atingido (Erro 429)</b> 🚫\n\n"
+            "Muitas solicitações foram feitas muito rápido (TooManyRequests).\n"
             "Por favor, <b>aguarde cerca de 1 minuto</b> antes de tentar novamente."
+        )
+        await update.effective_message.reply_html(mensagem_erro)
+        return  # Termina aqui
+
+    # === TRATATIVA DO ERRO 429 (TODAS AS QUOTAS ESGOTADAS) ===
+    elif intencao == "ERRO_429_QUOTA_ESGOTADA" or intencao == "ERRO_429":  # Pega o antigo e o novo
+        mensagem_erro = (
+            "🚫​ <b>TODAS AS QUOTAS ESGOTADAS (Erro 429)</b> 🚫\n\n"
+            "Todos os modelos de IA disponíveis atingiram suas quotas.\n"
+            "A funcionalidade de IA está temporariamente desativada.\n"
+            "Por favor, tente novamente mais tarde."
         )
         await update.effective_message.reply_html(mensagem_erro)
         return  # Termina aqui
@@ -475,6 +612,7 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     resposta_ai = await obter_resposta_gemini(mensagem_usuario)
     await update.effective_message.reply_text(resposta_ai)
 
+
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme. Agora ele interage com o banco de dados."""
     tarefa = context.job
@@ -497,7 +635,7 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             # Se não for a última mensagem, espera 2 segundos
             if i < 2:
-                await asyncio.sleep(1)  # Espera 2 segundos
+                await asyncio.sleep(1)  # Espera 1 segundo (ajuste se precisar)
 
         except Exception as e:
             logger.error(f"Erro ao enviar lembrete (tentativa {i + 1}): {e}", exc_info=True)
@@ -545,6 +683,7 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     finally:
         sessao.close()
 
+
 async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Busca no DB e lista os lembretes pendentes para o usuário."""
 
@@ -588,23 +727,22 @@ async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAU
     finally:
         sessao.close()
 
+
 # Se for usar a remoção de tarefas antigas, adicione esta função:
 def remover_tarefas_antigas(nome: str, context: ContextTypes.DEFAULT_TYPE):
     """Remove jobs antigos do JobQueue com o mesmo nome (chat_id)"""
     tarefas_atuais = context.job_queue.get_jobs_by_name(nome)
     if not tarefas_atuais:
-        return
+        return False  # MUDANÇA: Retorna False se não removeu
     logger.info(f"Removendo {len(tarefas_atuais)} tarefas antigas para o chat {nome}")
     for tarefa in tarefas_atuais:
         tarefa.schedule_removal()
+    return True  # MUDANÇA: Retorna True se removeu
+
 
 # --- Função Principal para Iniciar o Bot ---
 async def post_init(app: Application) -> None:
     """Função chamada após a inicialização do bot para re-agendar jobs do DB."""
-
-    # Esta linha não é necessária se você usar Application.builder().job_queue(True)
-    # app.job_queue.set_application(app)
-    # await app.job_queue.start() # Também não é necessário, o builder já cuida disso
 
     logger.info("Bot iniciado. Verificando lembretes pendentes no banco de dados...")
 
@@ -616,6 +754,7 @@ async def post_init(app: Application) -> None:
 
         if not lembretes_pendentes:
             logger.info("Nenhum lembrete pendente encontrado.")
+            sessao.close()  # Fecha a sessão aqui
             return
 
         logger.info(f"Re-agendando {len(lembretes_pendentes)} lembretes pendentes...")
@@ -632,9 +771,12 @@ async def post_init(app: Application) -> None:
     except Exception as e:
         logger.error(f"Erro ao re-agendar lembretes do DB: {e}", exc_info=True)
     finally:
-        sessao.close()
+        # Garante que a sessão seja fechada mesmo se 'lembretes_pendentes' for nulo
+        if sessao.is_active:
+            sessao.close()
 
     logger.info("Re-agendamento de lembretes concluído.")
+
 
 def main():
     """Inicia o bot."""
@@ -650,6 +792,7 @@ def main():
 
     # Inicia o bot (polling)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
