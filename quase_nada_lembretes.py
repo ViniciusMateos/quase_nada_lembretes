@@ -9,6 +9,7 @@ from pytz import timezone as pytz_timezone  # Mais confiável para fusos horári
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, ApplicationBuilder
 import re
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted # <<< ADICIONE ESTA LINHA
 import json
 from datetime import datetime, timedelta, timezone
 import sqlalchemy
@@ -122,19 +123,27 @@ def substituir_numeros_por_extenso(texto: str) -> str:
 
 async def obter_resposta_gemini(prompt: str) -> str:
     """Envia um prompt para o modelo Gemini e retorna a resposta de texto."""
+    if not modelo_gemini_instancia:
+        return "Desculpe, a IA para conversa geral não está configurada. Verifique a chave de API."
     try:
-        # Cria uma nova sessão de chat com o modelo Gemini
-        # Para conversas mais longas, você precisaria manter o estado do chat (histórico)
-        # Mas para respostas simples, podemos iniciar um chat novo a cada requisição.
-        chat_session = modelo_gemini_instancia.start_chat(history=[])
-        response = await chat_session.send_message_async(prompt)
+        sessao_chat = modelo_gemini_instancia.start_chat(history=[])
+        resposta = await sessao_chat.send_message_async(prompt)
+        return resposta.text
 
-        # Retorna a parte de texto da resposta.
-        # Pode ser necessário adicionar tratamento para respostas que não são de texto.
-        return response.text
+    # --- INÍCIO DA TRATATIVA DO 429 ---
+    except ResourceExhausted as e:
+        logger.error(f"Erro 429 (ResourceExhausted) ao obter resposta geral: {e}", exc_info=True)
+        # O limite padrão do Gemini 1.5 Flash é 15 RPM (Requisições por Minuto)
+        return (
+            "🚫​ <b>Limite da IA Atingido (Erro 429)</b> 🚫\n\n"
+            "Muitas solicitações foram feitas muito rápido.\n"
+            "Por favor, <b>aguarde cerca de 1 minuto</b> antes de tentar novamente."
+        )
+    # --- FIM DA TRATATIVA DO 429 ---
+
     except Exception as e:
-        logger.error(f"Erro ao interagir com a Gemini API: {e}", exc_info=True)
-        return "Desculpe, não consegui processar sua solicitação no momento. Minha IA está com problemas."
+        logger.error(f"Erro ao interagir com a Gemini API em obter_resposta_gemini: {e}", exc_info=True)
+        return "Desculpe, não consegui processar sua solicitação de conversa no momento."
 
 def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
     if not recorrencia:
@@ -168,95 +177,95 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
     Usa a Gemini API para classificar a intenção e extrair detalhes de um lembrete.
     Retorna um dicionário JSON com "intencao" e "dados".
     """
-    if not modelo_gemini_instancia:  # Correção aqui
+    if not modelo_gemini_instancia:
         logger.warning("Modelo Gemini não configurado. Não é possível extrair detalhes.")
         return None
 
     momento_atual = datetime.now(timezone.utc)
     prompt_ia = f"""
-        Analise o pedido do usuário em português.
-        Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
+            Analise o pedido do usuário em português.
+            Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
 
-        Formate a saída como um objeto JSON com "intencao" e "dados".
+            Formate a saída como um objeto JSON com "intencao" e "dados".
 
-        Campos esperados:
-        - "intencao": (string) "CRIAR_LEMBRETE", "LISTAR_LEMBRETES", ou "CHAT_GERAL".
-        - "dados": (object) Detalhes para CRIAR, ou null para as outras intenções.
+            Campos esperados:
+            - "intencao": (string) "CRIAR_LEMBRETE", "LISTAR_LEMBRETES", ou "CHAT_GERAL".
+            - "dados": (object) Detalhes para CRIAR, ou null para as outras intenções.
 
-        Regras para "CRIAR_LEMBRETE":
-        1.  **Formato de Hora:** A "hora" DEVE ser estritamente no formato HH:MM (24 horas).
-        2.  **Ambiguidade AM/PM:** Se o usuário disser "às 2" ou "2h", assuma "02:00" (manhã). Se o usuário disser "2 da tarde" ou "14h", use "14:00".
-        3.  **Título:** A ação ou o que deve ser lembrado.
-        4.  **Data:** A data no formato AAAA-MM-DD. Se for "hoje", use {momento_atual.strftime('%Y-%m-%d')}. Se for "amanhã", use {(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}.
-        5.  **Recorrência:** Ex: "diário", "semanal", "toda terça".
-        6.  **Segundos Relativos:** Se for "daqui X segundos/minutos/horas", o tempo em segundos.
+            Regras para "CRIAR_LEMBRETE":
+            1.  **Formato de Hora:** A "hora" DEVE ser estritamente no formato HH:MM (24 horas).
+            2.  **Ambiguidade AM/PM:** Se o usuário disser "às 2" ou "2h", assuma "02:00" (manhã). Se o usuário disser "2 da tarde" ou "14h", use "14:00".
+            3.  **Título:** A ação ou o que deve ser lembrado.
+            4.  **Data:** A data no formato AAAA-MM-DD. Se for "hoje", use {momento_atual.strftime('%Y-%m-%d')}. Se for "amanhã", use {(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}.
+            5.  **Recorrência:** Ex: "diário", "semanal", "toda terça".
+            6.  **Segundos Relativos:** Se for "daqui X segundos/minutos/horas", o tempo em segundos.
 
-        ---
-        Exemplos:
+            ---
+            Exemplos:
 
-        Pedido: "Me lembra de algo 2h21"
-        {{ 
-          "intencao": "CRIAR_LEMBRETE", 
-          "dados": {{
-            "titulo": "algo", 
-            "hora": "02:21", 
-            "data": null, 
-            "recorrencia": null, 
-            "segundos_relativos": null
-          }}
-        }}
+            Pedido: "Me lembra de algo 2h21"
+            {{ 
+              "intencao": "CRIAR_LEMBRETE", 
+              "dados": {{
+                "titulo": "algo", 
+                "hora": "02:21", 
+                "data": null, 
+                "recorrencia": null, 
+                "segundos_relativos": null
+              }}
+            }}
 
-        Pedido: "Me lembra de algo às 2 da tarde"
-        {{ 
-          "intencao": "CRIAR_LEMBRETE", 
-          "dados": {{
-            "titulo": "algo", 
-            "hora": "14:00", 
-            "data": null, 
-            "recorrencia": null, 
-            "segundos_relativos": null
-          }}
-        }}
+            Pedido: "Me lembra de algo às 2 da tarde"
+            {{ 
+              "intencao": "CRIAR_LEMBRETE", 
+              "dados": {{
+                "titulo": "algo", 
+                "hora": "14:00", 
+                "data": null, 
+                "recorrencia": null, 
+                "segundos_relativos": null
+              }}
+            }}
 
-        Pedido: "Me lembra de comprar pão amanhã às 7 da manhã."
-        {{ 
-          "intencao": "CRIAR_LEMBRETE", 
-          "dados": {{
-            "titulo": "comprar pão", 
-            "hora": "07:00", 
-            "data": "{(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}", 
-            "recorrencia": null, 
-            "segundos_relativos": null
-          }} 
-        }}
+            Pedido: "Me lembra de comprar pão amanhã às 7 da manhã."
+            {{ 
+              "intencao": "CRIAR_LEMBRETE", 
+              "dados": {{
+                "titulo": "comprar pão", 
+                "hora": "07:00", 
+                "data": "{(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}", 
+                "recorrencia": null, 
+                "segundos_relativos": null
+              }} 
+            }}
 
-        Pedido: "Me lista os lembretes pendentes"
-        {{ 
-          "intencao": "LISTAR_LEMBRETES", 
-          "dados": null 
-        }}
+            Pedido: "Me lista os lembretes pendentes"
+            {{ 
+              "intencao": "LISTAR_LEMBRETES", 
+              "dados": null 
+            }}
 
-        Pedido: "oi tudo bem?"
-        {{ 
-          "intencao": "CHAT_GERAL", 
-          "dados": null 
-        }}
+            Pedido: "oi tudo bem?"
+            {{ 
+              "intencao": "CHAT_GERAL", 
+              "dados": null 
+            }}
 
-        Pedido: "Me lembra em 30 minutos de tirar o bolo do forno."
-        {{ 
-          "intencao": "CRIAR_LEMBRETE", 
-          "dados": {{
-            "titulo": "tirar o bolo do forno", 
-            "hora": null, 
-            "data": null, 
-            "recorrencia": null, 
-            "segundos_relativos": 1800.0
-          }} 
-        }}
-        ---
+            Pedido: "Me lembra em 30 minutos de tirar o bolo do forno."
+            {{ 
+              "intencao": "CRIAR_LEMBRETE", 
+              "dados": {{
+                "titulo": "tirar o bolo do forno", 
+                "hora": null, 
+                "data": null, 
+                "recorrencia": null, 
+                "segundos_relativos": 1800.0
+              }} 
+            }}
+            ---
 
-        Pedido: "{texto_usuario}"
-        """
+            Pedido: "{texto_usuario}"
+            """
 
     try:
         sessao_chat = modelo_gemini_instancia.start_chat(history=[])
@@ -270,6 +279,14 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
 
         detalhes = json.loads(texto_resposta)
         return detalhes
+
+    # --- INÍCIO DA TRATATIVA DO 429 ---
+    except ResourceExhausted as e:
+        logger.error(f"Erro 429 (ResourceExhausted) ao extrair lembrete: {e}", exc_info=True)
+        # Retorna um JSON "falso" que o handler principal vai entender como erro
+        return {"intencao": "ERRO_429"}
+    # --- FIM DA TRATATIVA DO 429 ---
+
     except json.JSONDecodeError as e:
         logger.error(
             f"Erro ao decodificar JSON da Gemini API: {e}. Resposta: {resposta.text if 'resposta' in locals() else 'N/A'}",
@@ -305,7 +322,20 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     intencao = resposta_ia.get("intencao")
     detalhes_lembrete = resposta_ia.get("dados")  # 'dados' agora contém o JSON do lembrete (ou null)
 
+
+
     # --- 2. ROTEAMENTO BASEADO NA INTENÇÃO ---
+
+    # === TRATATIVA DO ERRO 429 (LIMITE DE RPM) ===
+    if intencao == "ERRO_429":
+        mensagem_erro = (
+            "🚫​ <b>Limite da IA Atingido (Erro 429)</b> 🚫\n\n"
+            "Muitas solicitações foram feitas muito rápido.\n"
+            "De acordo com a documentação, o limite do modelo Flash é de <b>15 requisições por minuto</b>.\n\n"
+            "Por favor, <b>aguarde cerca de 1 minuto</b> antes de tentar novamente."
+        )
+        await update.effective_message.reply_html(mensagem_erro)
+        return  # Termina aqui
 
     # === INTENÇÃO: LISTAR LEMBRETES ===
     if intencao == "LISTAR_LEMBRETES":
