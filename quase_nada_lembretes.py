@@ -69,10 +69,10 @@ MODELOS_DISPONIVEIS = [
     # --- NIVEL 2: OUTROS DA FAMÍLIA 2.5 (Geralmente estáveis) ---
     "models/gemini-2.5-flash-lite-preview-09-2025",
     "models/gemini-2.5-flash",
-    "models/gemini-flash-latest", # Apelido genérico, costuma ser bom
+    "models/gemini-flash-latest",  # Apelido genérico, costuma ser bom
 
     # --- NIVEL 3: DA FAMÍLIA 2.0 (Deram erro no log, ficam de reserva) ---
-    "models/gemini-2.0-flash-lite-preview-02-05", # Deu erro, mas mantemos como fallback
+    "models/gemini-2.0-flash-lite-preview-02-05",  # Deu erro, mas mantemos como fallback
     "models/gemini-2.0-flash-lite-preview",
     "models/gemini-2.0-flash-lite",
     "models/gemini-2.0-flash-lite-001",
@@ -238,10 +238,10 @@ def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
         # SE tiver um número depois de dia (ex: todo dia 15), é MENSAL
         match_dia_especifico = re.search(r"dia\s+(\d+)", r)
         if match_dia_especifico:
-             return 30 * 24 * 3600 # Trata como mensal
-        return 24 * 3600 # Se for só "todo dia", é diário
+            return 30 * 24 * 3600  # Trata como mensal
+        return 24 * 3600  # Se for só "todo dia", é diário
 
-    if "semanal" in r or "toda" in r: # "toda quarta" cai aqui
+    if "semanal" in r or "toda" in r:  # "toda quarta" cai aqui
         return 7 * 24 * 3600
 
     if "mensal" in r:
@@ -347,7 +347,8 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         return None
 
 
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_transcrito: str = None) -> None:
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                          texto_transcrito: str = None) -> None:
     """
     Lida com mensagens de texto/áudio.
     Chama a IA para classificar a intenção (CRIAR, LISTAR, CHAT) e age de acordo.
@@ -452,8 +453,183 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
         )
         return
 
-        # === INTENÇÃO: CRIAR LEMBRETE ===
+    # === INTENÇÃO: CRIAR LEMBRETE ===
     elif intencao == "CRIAR_LEMBRETE" and detalhes_lembrete:
+
+        titulo = detalhes_lembrete.get("titulo").upper()
+        hora_str = detalhes_lembrete.get("hora")
+        data_str = detalhes_lembrete.get("data")
+        recorrencia = detalhes_lembrete.get("recorrencia")
+        segundos_relativos = detalhes_lembrete.get("segundos_relativos")
+
+        momento_agendamento = None
+        agora_local = datetime.now(FUSO_HORARIO_LOCAL)
+
+        # --- LÓGICA MESTRA DE DATAS ---
+        # Prioridade 1: Segundos relativos (ex: "daqui 10 min")
+        if segundos_relativos is not None:
+            momento_agendamento = datetime.now(timezone.utc) + timedelta(seconds=float(segundos_relativos))
+
+        # Prioridade 2: Data Específica dada pela IA (ex: "dia 25 de dezembro")
+        elif data_str and hora_str:
+            try:
+                momento_local_naive = datetime.strptime(f"{data_str} {hora_str}", "%Y-%m-%d %H:%M")
+                momento_local_aware = FUSO_HORARIO_LOCAL.localize(momento_local_naive)
+                momento_agendamento = momento_local_aware.astimezone(timezone.utc)
+            except ValueError:
+                pass
+
+                # Prioridade 3: Recorrências e Horários (AQUI ESTÁ A CORREÇÃO)
+        elif hora_str:
+            try:
+                hora_h, min_m = map(int, hora_str.split(':'))
+                # Começamos assumindo HOJE no horário pedido
+                candidata = agora_local.replace(hour=hora_h, minute=min_m, second=0, microsecond=0)
+
+                recorrencia_lower = recorrencia.lower() if recorrencia else ""
+                dia_semana_encontrado = False
+
+                # --- 3.1 TRATAMENTO SEMANAL (Toda quarta, toda sexta...) ---
+                # Mapa de dias: 0=Segunda, 6=Domingo
+                dias_map = {
+                    "segunda": 0, "terça": 1, "terca": 1, "quarta": 2,
+                    "quinta": 3, "sexta": 4, "sábado": 5, "sabado": 5, "domingo": 6
+                }
+
+                for nome_dia, num_dia in dias_map.items():
+                    if nome_dia in recorrencia_lower:
+                        dia_semana_encontrado = True
+                        dia_atual = agora_local.weekday()
+
+                        # Calcula quantos dias faltam para chegar no dia alvo
+                        dias_para_adicionar = (num_dia - dia_atual + 7) % 7
+
+                        # Se deu 0 (é hoje) mas a hora já passou, soma 7 dias (próxima semana)
+                        if dias_para_adicionar == 0 and candidata < agora_local:
+                            dias_para_adicionar = 7
+
+                        candidata += timedelta(days=dias_para_adicionar)
+                        break  # Achou o dia, para o loop
+
+                # --- 3.2 TRATAMENTO MENSAL (Todo dia 15...) ---
+                if not dia_semana_encontrado and "dia" in recorrencia_lower:
+                    match_dia = re.search(r"dia\s+(\d+)", recorrencia_lower)
+                    if match_dia:
+                        dia_alvo = int(match_dia.group(1))
+                        try:
+                            # Tenta fixar o dia no mês atual
+                            candidata = candidata.replace(day=dia_alvo)
+                            # Se ficou no passado (ex: hoje é 26, pediu dia 15), joga pra mês que vem
+                            if candidata < agora_local:
+                                # Soma 32 dias e ajusta o dia para garantir que pule o mês
+                                candidata = (candidata + timedelta(days=32)).replace(day=dia_alvo)
+                        except ValueError:
+                            pass  # Ignora dia 30 em fevereiro, etc.
+
+                # --- 3.3 TRATAMENTO DIÁRIO / PONTUAL SEM DATA ---
+                # Se não era semanal nem mensal, mas a hora já passou hoje (ex: "remédio às 8h" e agora são 10h)
+                if not dia_semana_encontrado and "dia" not in recorrencia_lower:
+                    if candidata < agora_local:
+                        candidata += timedelta(days=1)
+
+                # Converte o resultado final para UTC
+                momento_agendamento = candidata.astimezone(timezone.utc)
+
+            except Exception as e:
+                logger.error(f"Erro calculando data: {e}")
+                await update.effective_message.reply_text("Erro ao calcular a data do lembrete.")
+                return
+
+        # --- SEGUIMENTO DO CÓDIGO (Validações e Banco) ---
+        if not momento_agendamento:
+            # Se falhou tudo acima, tenta usar só a data se tiver
+            if data_str:
+                try:
+                    d = datetime.strptime(data_str, "%Y-%m-%d")
+                    momento_agendamento = FUSO_HORARIO_LOCAL.localize(d).astimezone(timezone.utc)
+                except:
+                    pass
+
+        if not momento_agendamento or momento_agendamento < datetime.now(timezone.utc):
+            if not momento_agendamento:  # Só reclama se for nulo, pq se for passado a gente já tratou acima
+                await update.effective_message.reply_text("Não consegui entender a data ou hora.")
+                return
+
+        if not titulo:
+            titulo = "Lembrete Geral"
+
+        intervalo = intervalo_recorrencia_em_segundos(recorrencia)
+
+        # Correção extra: Se tem recorrência mas intervalo veio vazio
+        if recorrencia and not intervalo:
+            intervalo = intervalo_recorrencia_em_segundos(recorrencia)
+
+        # Remove anteriores e Salva
+        remover_tarefas_antigas(str(id_chat), context)
+
+        primeira_execucao_utc = momento_agendamento
+
+        data_fim_str = detalhes_lembrete.get("data_fim")
+        data_fim_dt = None
+        if data_fim_str:
+            try:
+                data_fim_naive = datetime.strptime(data_fim_str, "%Y-%m-%d")
+                data_fim_dt = FUSO_HORARIO_LOCAL.localize(data_fim_naive).astimezone(timezone.utc)
+            except:
+                pass
+
+        sessao = SessionLocal()
+        try:
+            novo_lembrete = Lembrete(
+                chat_id=id_chat,
+                titulo=titulo,
+                proxima_execucao=primeira_execucao_utc,
+                intervalo_segundos=intervalo,
+                recorrencia_str=recorrencia,
+                data_fim=data_fim_dt
+            )
+            sessao.add(novo_lembrete)
+            sessao.commit()
+            id_db = novo_lembrete.id
+        except Exception as e:
+            logger.error(f"Erro ao salvar: {e}")
+            sessao.rollback()
+            await update.effective_message.reply_text("Erro no banco de dados.")
+            return
+        finally:
+            sessao.close()
+
+        context.job_queue.run_once(
+            disparar_alarme,
+            when=primeira_execucao_utc,
+            chat_id=id_chat,
+            name=str(id_db),
+            data={"titulo": titulo, "id_db": id_db}
+        )
+
+        # Resposta Formatada
+        primeira_execucao_utc = primeira_execucao_utc.replace(tzinfo=timezone.utc)
+        momento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
+        data_fmt = momento_local.strftime('%d/%m/%Y às %H:%M')
+
+        texto_html = ""
+        if intervalo or recorrencia:
+            t_rec = recorrencia if recorrencia else "Recorrente"
+            texto_html = (
+                "<b>🟢 LEMBRETE RECORRENTE</b>\n\n"
+                f"<b>\"{titulo}\"</b>\n"
+                f"Próximo: <b>{data_fmt}</b>\n"
+                f"Repete: <b>{t_rec}</b>"
+            )
+        else:
+            texto_html = (
+                "<b>🟢​ LEMBRETE</b>\n\n"
+                f"<b>\"{titulo}\"</b>\n"
+                f"Agendado para: <b>{data_fmt}</b>"
+            )
+
+        await update.effective_message.reply_html(texto_html)
+        return
 
         # 1. DEFINE AS VARIÁVEIS PRIMEIRO (Correção do erro anterior)
         titulo = detalhes_lembrete.get("titulo").upper()
@@ -720,6 +896,7 @@ async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT
         finally:
             sessao.close()
 
+
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme insistente com botões de adiar na última mensagem."""
     tarefa = context.job
@@ -828,7 +1005,7 @@ async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAU
                 "\n----------------------"
                 f"\n<b>\"{lembrete.titulo}\"</b>\n"
                 f"  <b>Próximo:</b> {momento_local.strftime('%d/%m/%Y às %H:%M')}"
-                f"{info_frequencia}" # Mostra a recorrência logo abaixo do próximo
+                f"{info_frequencia}"  # Mostra a recorrência logo abaixo do próximo
                 "\n----------------------"
             )
 
