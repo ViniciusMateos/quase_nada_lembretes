@@ -615,11 +615,55 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
 
 
 async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Processa o clique nos botões de confirmação de exclusão."""
+    """Processa confirmação de exclusão e agora também o adiamento (snooze)."""
     query = update.callback_query
     await query.answer()  # Tira o reloginho do botão
-
     data = query.data
+
+    # --- LÓGICA DE ADIAR (SNOOZE) ---
+    if data.startswith("snz_"):
+        # Formato esperado: snz_MINUTOS_ID (ex: snz_5_123)
+        partes = data.split("_")
+        minutos = int(partes[1])
+        id_db = int(partes[2])
+
+        sessao = SessionLocal()
+        try:
+            lembrete = sessao.query(Lembrete).filter(Lembrete.id == id_db).first()
+
+            if not lembrete:
+                await query.edit_message_text("❌ Erro: Lembrete não encontrado para adiar.")
+                return
+
+            # Calcula a nova hora baseada em AGORA (momento do clique)
+            nova_execucao_utc = datetime.now(timezone.utc) + timedelta(minutes=minutos)
+
+            # Atualiza o Banco de Dados
+            lembrete.proxima_execucao = nova_execucao_utc
+            sessao.commit()
+
+            # Agenda o novo Job
+            context.job_queue.run_once(
+                disparar_alarme,
+                when=nova_execucao_utc,
+                chat_id=update.effective_chat.id,
+                name=str(id_db),
+                data={"titulo": lembrete.titulo, "id_db": id_db}
+            )
+
+            # Responde pro usuário (com negrito em HTML)
+            hora_local = nova_execucao_utc.astimezone(FUSO_HORARIO_LOCAL).strftime('%H:%M')
+            await query.edit_message_text(
+                f"<b>Adiado!</b> Vou te lembrar de <b>\"{lembrete.titulo}\"</b> novamente às <b>{hora_local}</b>.",
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+            logger.error(f"Erro ao adiar lembrete: {e}")
+            await query.edit_message_text("❌ Erro técnico ao tentar adiar.")
+        finally:
+            sessao.close()
+        return
 
     if data == "del_cancel":
         await query.edit_message_text(
@@ -660,65 +704,66 @@ async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT
             sessao.close()
 
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Disparo do alarme com interação no banco de dados."""
+    """Disparo do alarme insistente com botões de adiar na última mensagem."""
     tarefa = context.job
     id_db = tarefa.name
     titulo = tarefa.data.get("titulo", "Lembrete")
-
-    # Define a mensagem
     texto_lembrete_html = f"<b>🟠​ LEMBRETE</b>\n\n<b>\"{titulo}\"</b>"
 
     # Envia a mensagem 3 vezes
     for i in range(3):
+        reply_markup = None
+
+        # --- NOVO: Só coloca os botões na TERCEIRA mensagem ---
+        if i == 2:
+            keyboard = [
+                [
+                    InlineKeyboardButton("⏰ +5 min", callback_data=f"snz_5_{id_db}"),
+                    InlineKeyboardButton("⏰ +10 min", callback_data=f"snz_10_{id_db}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
         try:
             await context.bot.send_message(
                 tarefa.chat_id,
                 text=texto_lembrete_html,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=reply_markup  # Adiciona os botões aqui
             )
             if i < 2:
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)  # Intervalo entre as insistências
         except Exception as e:
-            logger.error(f"Erro ao enviar lembrete (tentativa {i + 1}): {e}", exc_info=True)
-            await asyncio.sleep(1)
+            logger.error(f"Erro no disparo {i + 1}: {e}")
 
+    # Lógica do Banco de Dados
     sessao = SessionLocal()
     try:
-        # Busca o lembrete no banco de dados
         lembrete_db = sessao.query(Lembrete).filter(Lembrete.id == int(id_db)).first()
+        if not lembrete_db: return
 
-        if not lembrete_db:
-            logger.warning(f"Lembrete ID {id_db} disparado mas não encontrado no DB.")
-            return
-
-        # SE FOR RECORRENTE:
+        # SE FOR RECORRENTE: Atualiza para a próxima data padrão
         if lembrete_db.intervalo_segundos and lembrete_db.intervalo_segundos > 0:
-            # Calcula a próxima execução
-            nova_proxima_execucao = lembrete_db.proxima_execucao + timedelta(seconds=lembrete_db.intervalo_segundos)
-
-            # Atualiza o banco
-            lembrete_db.proxima_execucao = nova_proxima_execucao
+            nova_data = lembrete_db.proxima_execucao + timedelta(seconds=lembrete_db.intervalo_segundos)
+            lembrete_db.proxima_execucao = nova_data
             sessao.commit()
 
-            # Re-agenda o próximo 'run_once'
             context.job_queue.run_once(
                 disparar_alarme,
-                when=nova_proxima_execucao,
+                when=nova_data,
                 chat_id=tarefa.chat_id,
                 name=str(id_db),
                 data={"titulo": titulo, "id_db": id_db}
             )
-            logger.info(f"Lembrete recorrente ID {id_db} re-agendado para {nova_proxima_execucao}.")
 
-        # SE FOR ÚNICO:
+        # SE FOR ÚNICO: Não vamos mais deletar aqui!
+        # Deixamos ele no DB para que o botão "Adiar" possa encontrá-lo.
+        # Ele não aparecerá na 'lista' porque a data já passou.
         else:
-            # Deleta o lembrete do banco
-            sessao.delete(lembrete_db)
-            sessao.commit()
-            logger.info(f"Lembrete único ID {id_db} disparado e removido do DB.")
+            logger.info(f"Lembrete único {id_db} disparado. Mantido no DB para possível adiamento.")
 
     except Exception as e:
-        logger.error(f"Erro ao processar disparo de alarme no DB para ID {id_db}: {e}", exc_info=True)
+        logger.error(f"Erro no DB: {e}")
         sessao.rollback()
     finally:
         sessao.close()
