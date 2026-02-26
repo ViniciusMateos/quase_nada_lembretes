@@ -622,7 +622,10 @@ async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT
     data = query.data
 
     if data == "del_cancel":
-        await query.edit_message_text("Operação cancelada. O lembrete continua ativo.")
+        await query.edit_message_text(
+            "<b>Operação cancelada</b>. O lembrete continua <b>ativo</b>.",
+            parse_mode="HTML"
+        )
         return
 
     if data.startswith("del_"):
@@ -642,7 +645,10 @@ async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT
                 sessao.delete(lembrete)
                 sessao.commit()
 
-                await query.edit_message_text(f"✅ Feito! O lembrete foi apagado com sucesso.")
+                await query.edit_message_text(
+                    f"<b>Feito!</b> O lembrete foi <b>apagado</b> com sucesso.",
+                    parse_mode="HTML"
+                )
             else:
                 await query.edit_message_text(
                     "Ué, não encontrei esse lembrete no banco de dados. Talvez já tenha sido apagado.")
