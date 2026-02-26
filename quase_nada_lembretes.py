@@ -1,9 +1,10 @@
 import asyncio
 import os
 import logging
+from telegram.ext import CallbackQueryHandler
 from number_parser import parse_ordinal, parse_number
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from pytz import timezone as pytz_timezone  # Mais confiável para fusos horários
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue, \
     ApplicationBuilder
@@ -256,13 +257,17 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
 
     prompt_ia = f"""
             Analise o pedido do usuário em português.
-            Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
+            Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "DELETAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
 
             Formate a saída como um objeto JSON com "intencao" e "dados".
 
             Campos esperados:
             - "intencao": (string) "CRIAR_LEMBRETE", "LISTAR_LEMBRETES", ou "CHAT_GERAL".
             - "dados": (object) Detalhes para CRIAR, ou null para as outras intenções.
+            
+            - Se for "DELETAR_LEMBRETE" (ex: "apaga o lembrete de academia", "deleta a tarefa X", "remover lembrete"), 
+            
+  extraia o "titulo" da tarefa que o usuário quer apagar no campo "dados".
 
             Regras para "CRIAR_LEMBRETE":
             1.  **Formato de Hora:** A "hora" DEVE ser estritamente no formato HH:MM (24 horas).
@@ -374,8 +379,7 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
         return None
 
 
-async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                          texto_transcrito: str = None) -> None:
+async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_transcrito: str = None) -> None:
     """
     Lida com mensagens de texto/áudio.
     Chama a IA para classificar a intenção (CRIAR, LISTAR, CHAT) e age de acordo.
@@ -438,6 +442,46 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     # === INTENÇÃO: LISTAR LEMBRETES ===
     if intencao == "LISTAR_LEMBRETES":
         await listar_lembretes_pendentes(update, context)
+        return
+
+    # === INTENÇÃO: DELETAR LEMBRETE ===
+    if intencao == "DELETAR_LEMBRETE":
+        titulo_para_apagar = detalhes_lembrete.get("titulo") if detalhes_lembrete else None
+
+        if not titulo_para_apagar:
+            await update.effective_message.reply_text(
+                "Qual lembrete você gostaria de apagar? Não consegui identificar o nome.")
+            return
+
+        sessao = SessionLocal()
+        # Busca lembretes que contenham o título que o usuário falou
+        lembretes = sessao.query(Lembrete).filter(
+            Lembrete.chat_id == id_chat,
+            Lembrete.titulo.ilike(f"%{titulo_para_apagar}%")
+        ).all()
+        sessao.close()
+
+        if not lembretes:
+            await update.effective_message.reply_text(
+                f"Não encontrei nenhum lembrete com o nome '{titulo_para_apagar}'.")
+            return
+
+        # Se encontrou mais de um, ou o primeiro, pede confirmação
+        # Para simplificar, vamos pegar o primeiro encontrado
+        alvo = lembretes[0]
+
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Sim, apagar", callback_data=f"del_{alvo.id}"),
+                InlineKeyboardButton("❌ Não, manter", callback_data="del_cancel")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.effective_message.reply_html(
+            f"Deseja realmente apagar o lembrete: <b>\"{alvo.titulo}\"</b>?",
+            reply_markup=reply_markup
+        )
         return
 
     # === INTENÇÃO: CRIAR LEMBRETE ===
@@ -569,6 +613,45 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
     resposta_ai = await obter_resposta_gemini(mensagem_usuario)
     await update.effective_message.reply_text(resposta_ai)
 
+
+async def lidar_botoes_confirmacao(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Processa o clique nos botões de confirmação de exclusão."""
+    query = update.callback_query
+    await query.answer()  # Tira o reloginho do botão
+
+    data = query.data
+
+    if data == "del_cancel":
+        await query.edit_message_text("Operação cancelada. O lembrete continua ativo.")
+        return
+
+    if data.startswith("del_"):
+        id_db = data.split("_")[1]
+
+        sessao = SessionLocal()
+        try:
+            lembrete = sessao.query(Lembrete).filter(Lembrete.id == int(id_db)).first()
+
+            if lembrete:
+                # 1. Remove do JobQueue (usamos o ID do DB como nome do job, lembra?)
+                jobs_atuais = context.job_queue.get_jobs_by_name(str(lembrete.id))
+                for job in jobs_atuais:
+                    job.schedule_removal()
+
+                # 2. Remove do Banco de Dados
+                sessao.delete(lembrete)
+                sessao.commit()
+
+                await query.edit_message_text(f"✅ Feito! O lembrete foi apagado com sucesso.")
+            else:
+                await query.edit_message_text(
+                    "Ué, não encontrei esse lembrete no banco de dados. Talvez já tenha sido apagado.")
+
+        except Exception as e:
+            logger.error(f"Erro ao deletar lembrete: {e}", exc_info=True)
+            await query.edit_message_text("Erro técnico ao tentar apagar o lembrete.")
+        finally:
+            sessao.close()
 
 async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Disparo do alarme com interação no banco de dados."""
@@ -730,6 +813,7 @@ def main():
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     application.add_handler(MessageHandler(filters.VOICE, lidar_com_audio_rejeitado))
+    application.add_handler(CallbackQueryHandler(lidar_botoes_confirmacao))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lidar_com_mensagens_texto_geral))
     application.add_error_handler(lidar_erros)
 
