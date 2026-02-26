@@ -584,6 +584,10 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                 )
 
                 # RESPONDER AO USUÁRIO
+                # Certifique-se de que primeira_execucao_utc tenha o tzinfo definido
+                if primeira_execucao_utc.tzinfo is None:
+                    primeira_execucao_utc = primeira_execucao_utc.replace(tzinfo=timezone.utc)
+
                 momento_agendamento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
                 data_formatada = momento_agendamento_local.strftime('%d/%m/%Y às %H:%M')
                 texto_html = ""
@@ -790,7 +794,12 @@ async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAU
         resposta_html = ["<b>🔵​ LEMBRETES PENDENTES:</b>\n"]
 
         for lembrete in lembretes_pendentes:
-            momento_local = lembrete.proxima_execucao.astimezone(FUSO_HORARIO_LOCAL)
+            # 1. Pega a data do banco (que vem sem fuso) e diz ao Python: "Isso é UTC"
+            data_utc = lembrete.proxima_execucao.replace(tzinfo=timezone.utc)
+
+            # 2. Agora sim, converte de UTC para o fuso de São Paulo
+            momento_local = data_utc.astimezone(FUSO_HORARIO_LOCAL)
+
             data_formatada = momento_local.strftime('%d/%m/%Y às %H:%M')
 
             recorrencia_info = ""
