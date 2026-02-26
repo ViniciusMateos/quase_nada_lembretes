@@ -52,6 +52,7 @@ class Lembrete(Base):
     proxima_execucao = Column(DateTime(timezone=True), nullable=False)
     intervalo_segundos = Column(Integer, nullable=True)  # 0 para único, > 0 para recorrente
     recorrencia_str = Column(String, nullable=True)  # Para exibir (ex: "diário")
+    data_fim = Column(DateTime(timezone=True), nullable=True)
 
 
 # Cria a tabela se ela não existir (cria o arquivo lembretes.db na primeira execução)
@@ -233,10 +234,14 @@ def intervalo_recorrencia_em_segundos(recorrencia: str | None) -> int | None:
     if match_minutos:
         return int(match_minutos.group(1)) * 60
 
-    if "diário" in r or "diaria" in r:
-        return 24 * 3600
+    if "diário" in r or "diaria" in r or "todo dia" in r:
+        # SE tiver um número depois de dia (ex: todo dia 15), é MENSAL
+        match_dia_especifico = re.search(r"dia\s+(\d+)", r)
+        if match_dia_especifico:
+             return 30 * 24 * 3600 # Trata como mensal
+        return 24 * 3600 # Se for só "todo dia", é diário
 
-    if "semanal" in r:
+    if "semanal" in r or "toda" in r: # "toda quarta" cai aqui
         return 7 * 24 * 3600
 
     if "mensal" in r:
@@ -256,93 +261,56 @@ async def extrair_detalhes_lembrete_com_gemini(texto_usuario: str) -> dict | Non
     momento_atual = datetime.now(timezone.utc)
 
     prompt_ia = f"""
-            Analise o pedido do usuário em português.
-            Primeiro, classifique a "intencao" como "CRIAR_LEMBRETE", "DELETAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
+        És um sistema de extração de dados. Responda APENAS com um objeto JSON válido. Proibido qualquer texto explicativo.
 
-            Formate a saída como um objeto JSON com "intencao" e "dados".
+        Classifique a "intencao" como: "CRIAR_LEMBRETE", "DELETAR_LEMBRETE", "LISTAR_LEMBRETES" ou "CHAT_GERAL".
 
-            Campos esperados:
-            - "intencao": (string) "CRIAR_LEMBRETE", "LISTAR_LEMBRETES", ou "CHAT_GERAL".
-            - "dados": (object) Detalhes para CRIAR, ou null para as outras intenções.
-            
-            - Se for "DELETAR_LEMBRETE" (ex: "apaga o lembrete de academia", "deleta a tarefa X", "remover lembrete"), 
-            
-  extraia o "titulo" da tarefa que o usuário quer apagar no campo "dados".
+        Campos obrigatórios no JSON:
+        - "intencao": (string)
+        - "dados": (object ou null)
 
-            Regras para "CRIAR_LEMBRETE":
-            1.  **Formato de Hora:** A "hora" DEVE ser estritamente no formato HH:MM (24 horas).
-            2.  **Ambiguidade AM/PM:** Se o usuário disser "às 2" ou "2h", assuma "02:00" (manhã). Se o usuário disser "2 da tarde" ou "14h", use "14:00".
-            3.  **Título:** A ação ou o que deve ser lembrado.
-            4.  **Data:** A data no formato AAAA-MM-DD. Se for "hoje", use {momento_atual.strftime('%Y-%m-%d')}. Se for "amanhã", use {(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}.
-            5.  **Recorrência:** Ex: "diário", "semanal", "toda terça".
-            6.  **Segundos Relativos:** Se for "daqui X segundos/minutos/horas", o tempo em segundos.
+        Regras para "CRIAR_LEMBRETE" (preencher no campo "dados"):
+        1. **Hora**: Formato HH:MM (24 horas). Se disser "às 2" ou "2h", assuma "02:00". Se disser "2 da tarde", use "14:00".
+        2. **Título**: O que deve ser lembrado.
+        3. **Data**: Formato AAAA-MM-DD. Hoje é {momento_atual.strftime('%Y-%m-%d')}.
+        4. **Recorrência**: (string) Ex: "diário", "toda quarta", "todo mês", "todo dia 10".
+        5. **Intervalo**: "intervalo_segundos" (int). Diário=86400, Semanal=604800, Mensal=2592000.
+        6. **Data Fim**: "data_fim" (string AAAA-MM-DD). Use se o usuário disser "por X dias" ou "até mês X". Se for contínuo, use null.
+        7. **Relativo**: "segundos_relativos" (float) para casos como "daqui a X minutos".
 
-            ---
-            Exemplos:
+        Regras para "DELETAR_LEMBRETE":
+        - Extraia apenas o "titulo" da tarefa para o campo "dados".
 
-            Pedido: "Me lembra de algo 2h21"
-            {{
-              "intencao": "CRIAR_LEMBRETE",
-              "dados": {{
-                "titulo": "algo",
-                "hora": "02:21",
-                "data": null,
-                "recorrencia": null,
-                "segundos_relativos": null
-              }}
-            }}
+        ---
+        Exemplos de Saída:
 
-            Pedido: "Me lembra de algo às 2 da tarde"
-            {{
-              "intencao": "CRIAR_LEMBRETE",
-              "dados": {{
-                "titulo": "algo",
-                "hora": "14:00",
-                "data": null,
-                "recorrencia": null,
-                "segundos_relativos": null
-              }}
-            }}
+        Usuário: "Me lembra de assistir toda quarta"
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{ "titulo": "assistir", "hora": "00:00", "recorrencia": "toda quarta", "intervalo_segundos": 604800, "data_fim": null }} 
+        }}
 
-            Pedido: "Me lembra de comprar pão amanhã às 7 da manhã."
-            {{
-              "intencao": "CRIAR_LEMBRETE",
-              "dados": {{
-                "titulo": "comprar pão",
-                "hora": "07:00",
-                "data": "{(momento_atual + timedelta(days=1)).strftime('%Y-%m-%d')}",
-                "recorrencia": null,
-                "segundos_relativos": null
-              }}
-            }}
+        Usuário: "Tomar remédio às 8h pelos próximos 3 dias"
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{ "titulo": "tomar remédio", "hora": "08:00", "recorrencia": "diário", "intervalo_segundos": 86400, "data_fim": "{(momento_atual + timedelta(days=3)).strftime('%Y-%m-%d')}" }} 
+        }}
 
-            Pedido: "Me lista os lembretes pendentes"
-            {{
-              "intencao": "LISTAR_LEMBRETES",
-              "dados": null
-            }}
+        Usuário: "Todo mês dia 10 pagar o aluguel"
+        {{ 
+          "intencao": "CRIAR_LEMBRETE", 
+          "dados": {{ "titulo": "pagar o aluguel", "hora": "09:00", "recorrencia": "todo mês", "intervalo_segundos": 2592000, "data_fim": null }} 
+        }}
 
-            Pedido: "oi tudo bem?"
-            {{
-              "intencao": "CHAT_GERAL",
-              "dados": null
-            }}
+        Usuário: "apaga o lembrete da academia"
+        {{ "intencao": "DELETAR_LEMBRETE", "dados": {{ "titulo": "academia" }} }}
 
-            Pedido: "Me lembra em 30 minutos de tirar o bolo do forno."
-            {{
-              "intencao": "CRIAR_LEMBRETE",
-              "dados": {{
-                "titulo": "tirar o bolo do forno",
-                "hora": null,
-                "data": null,
-                "recorrencia": null,
-                "segundos_relativos": 1800.0
-              }}
-            }}
-            ---
+        Usuário: "me lista os lembretes"
+        {{ "intencao": "LISTAR_LEMBRETES", "dados": null }}
 
-            Pedido: "{texto_usuario}"
-            """
+        ---
+        Pedido do usuário: "{texto_usuario}"
+        """
 
     try:
         sessao_chat = modelo_gemini_instancia.start_chat(history=[])
@@ -484,16 +452,46 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
         )
         return
 
-    # === INTENÇÃO: CRIAR LEMBRETE ===
+        # === INTENÇÃO: CRIAR LEMBRETE ===
     elif intencao == "CRIAR_LEMBRETE" and detalhes_lembrete:
 
+        # 1. DEFINE AS VARIÁVEIS PRIMEIRO (Correção do erro anterior)
         titulo = detalhes_lembrete.get("titulo").upper()
         hora_str = detalhes_lembrete.get("hora")
         data_str = detalhes_lembrete.get("data")
         recorrencia = detalhes_lembrete.get("recorrencia")
         segundos_relativos = detalhes_lembrete.get("segundos_relativos")
 
-        # Verifica se a IA realmente extraiu alguma informação de tempo
+        # 2. AGORA SIM: CORREÇÃO DE DATA PARA "TODO DIA X"
+        # Se a IA identificou recorrência e tem "dia X", verificamos se já passou
+        if recorrencia and "dia" in recorrencia.lower():
+            match_dia = re.search(r"dia\s+(\d+)", recorrencia, re.IGNORECASE)
+            if match_dia:
+                dia_alvo = int(match_dia.group(1))
+                agora_local = datetime.now(FUSO_HORARIO_LOCAL)
+
+                try:
+                    # Define hora padrão 09:00 se a IA não pegou hora
+                    hora_h = int(hora_str.split(':')[0]) if hora_str else 9
+                    min_m = int(hora_str.split(':')[1]) if hora_str else 0
+
+                    # Cria data candidata neste mês
+                    candidata = agora_local.replace(day=dia_alvo, hour=hora_h, minute=min_m, second=0, microsecond=0)
+
+                    # Se hoje é 26 e pediu dia 15, a data candidata ficou no passado.
+                    # Jogamos para o mês que vem.
+                    if candidata < agora_local:
+                        proximo_mes = candidata + timedelta(days=32)
+                        candidata = proximo_mes.replace(day=dia_alvo)
+
+                    # Atualiza as variáveis que o código usará abaixo
+                    data_str = candidata.strftime("%Y-%m-%d")
+                    hora_str = candidata.strftime("%H:%M")
+
+                except ValueError:
+                    pass  # Ignora erros de data (ex: dia 31 em fevereiro)
+
+        # 3. VERIFICAÇÃO SE TEM DADOS SUFICIENTES
         if not (segundos_relativos is not None or hora_str or data_str or recorrencia):
             pass  # Deixa cair para o CHAT_GERAL no final
         else:
@@ -542,15 +540,26 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
             if not titulo:
                 titulo = "Lembrete Geral"
 
+            # Calcula intervalo e limpa tarefas antigas
             intervalo = intervalo_recorrencia_em_segundos(recorrencia)
             tarefa_removida = remover_tarefas_antigas(str(id_chat), context)
 
-            if intervalo or momento_agendamento:
+            if intervalo or momento_agendamento or recorrencia:
+                # Se tem recorrencia mas intervalo veio vazio, tenta calcular de novo
+                if recorrencia and not intervalo:
+                    intervalo = intervalo_recorrencia_em_segundos(recorrencia)
+
                 if intervalo:
                     primeira_execucao_utc = momento_agendamento if momento_agendamento else datetime.now(
                         timezone.utc) + timedelta(seconds=intervalo)
                 else:
                     primeira_execucao_utc = momento_agendamento
+
+                data_fim_str = detalhes_lembrete.get("data_fim")
+                data_fim_dt = None
+                if data_fim_str:
+                    data_fim_naive = datetime.strptime(data_fim_str, "%Y-%m-%d")
+                    data_fim_dt = FUSO_HORARIO_LOCAL.localize(data_fim_naive).astimezone(timezone.utc)
 
                 # SALVAR NO BANCO DE DADOS
                 sessao = SessionLocal()
@@ -560,7 +569,8 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                         titulo=titulo,
                         proxima_execucao=primeira_execucao_utc,
                         intervalo_segundos=intervalo,
-                        recorrencia_str=recorrencia
+                        recorrencia_str=recorrencia,
+                        data_fim=data_fim_dt
                     )
                     sessao.add(novo_lembrete)
                     sessao.commit()
@@ -583,25 +593,28 @@ async def lidar_com_mensagens_texto_geral(update: Update, context: ContextTypes.
                     data={"titulo": titulo, "id_db": id_db}
                 )
 
-                # RESPONDER AO USUÁRIO
-                # Certifique-se de que primeira_execucao_utc tenha o tzinfo definido
+                # RESPONDER AO USUÁRIO (MENSAGEM CORRIGIDA)
                 if primeira_execucao_utc.tzinfo is None:
                     primeira_execucao_utc = primeira_execucao_utc.replace(tzinfo=timezone.utc)
 
                 momento_agendamento_local = primeira_execucao_utc.astimezone(FUSO_HORARIO_LOCAL)
                 data_formatada = momento_agendamento_local.strftime('%d/%m/%Y às %H:%M')
-                texto_html = ""
 
-                if intervalo:
+                texto_html = ""
+                # Se tem intervalo OU recorrencia escrita, é recorrente
+                if intervalo or recorrencia:
+                    texto_recorrencia = recorrencia if recorrencia else "Recorrente"
                     texto_html = (
-                        "<b>🟢​ LEMBRETE RECORRENTE</b>\n\n"
-                        f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
-                        f"\nRecorrência: <b>{recorrencia}</b>"
+                        "<b>🟢 LEMBRETE RECORRENTE</b>\n\n"
+                        f"<b>\"{titulo}\"</b>\n"
+                        f"Próximo: <b>{data_formatada}</b>\n"
+                        f"Repete: <b>{texto_recorrencia}</b>"
                     )
                 else:
                     texto_html = (
                         "<b>🟢​ LEMBRETE</b>\n\n"
-                        f"<b>\"{titulo}\"</b> agendado para <b>{data_formatada}</b>!"
+                        f"<b>\"{titulo}\"</b>\n"
+                        f"Agendado para: <b>{data_formatada}</b>"
                     )
 
                 if tarefa_removida:
@@ -748,13 +761,21 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         # SE FOR RECORRENTE: Atualiza para a próxima data padrão
         if lembrete_db.intervalo_segundos and lembrete_db.intervalo_segundos > 0:
-            nova_data = lembrete_db.proxima_execucao + timedelta(seconds=lembrete_db.intervalo_segundos)
-            lembrete_db.proxima_execucao = nova_data
-            sessao.commit()
+            nova_proxima_execucao = lembrete_db.proxima_execucao + timedelta(seconds=lembrete_db.intervalo_segundos)
+
+            # --- CHECA SE O PRAZO ACABOU ---
+            if lembrete_db.data_fim and nova_proxima_execucao > lembrete_db.data_fim:
+                logger.info(f"Lembrete ID {id_db} finalizado pelo prazo.")
+                sessao.delete(lembrete_db)  # Pode deletar se o prazo acabou
+                sessao.commit()
+            else:
+                # Atualiza e reagenda normal
+                lembrete_db.proxima_execucao = nova_proxima_execucao
+                sessao.commit()
 
             context.job_queue.run_once(
                 disparar_alarme,
-                when=nova_data,
+                when=nova_proxima_execucao,
                 chat_id=tarefa.chat_id,
                 name=str(id_db),
                 data={"titulo": titulo, "id_db": id_db}
@@ -794,23 +815,21 @@ async def listar_lembretes_pendentes(update: Update, context: ContextTypes.DEFAU
         resposta_html = ["<b>🔵​ LEMBRETES PENDENTES:</b>\n"]
 
         for lembrete in lembretes_pendentes:
-            # 1. Pega a data do banco (que vem sem fuso) e diz ao Python: "Isso é UTC"
             data_utc = lembrete.proxima_execucao.replace(tzinfo=timezone.utc)
-
-            # 2. Agora sim, converte de UTC para o fuso de São Paulo
             momento_local = data_utc.astimezone(FUSO_HORARIO_LOCAL)
 
-            data_formatada = momento_local.strftime('%d/%m/%Y às %H:%M')
-
-            recorrencia_info = ""
+            # Formatação da repetição
+            info_frequencia = ""
             if lembrete.recorrencia_str:
-                recorrencia_info = f" <i>(Recorrência: {lembrete.recorrencia_str})</i>"
+                prazo = f"(até {lembrete.data_fim.strftime('%d/%m')})" if lembrete.data_fim else "(contínuo)"
+                info_frequencia = f"\n  <b>Repete:</b> {lembrete.recorrencia_str} {prazo}"
 
             resposta_html.append(
                 "\n----------------------"
                 f"\n<b>\"{lembrete.titulo}\"</b>\n"
-                f"  <b>Data:</b> {data_formatada}{recorrencia_info}\n"
-                "----------------------"
+                f"  <b>Próximo:</b> {momento_local.strftime('%d/%m/%Y às %H:%M')}"
+                f"{info_frequencia}" # Mostra a recorrência logo abaixo do próximo
+                "\n----------------------"
             )
 
         await update.effective_message.reply_html("\n".join(resposta_html))
