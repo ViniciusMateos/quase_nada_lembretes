@@ -1038,7 +1038,7 @@ async def disparar_alarme(context: ContextTypes.DEFAULT_TYPE) -> None:
     tarefa = context.job
     id_db = tarefa.name
     titulo = tarefa.data.get("titulo", "Lembrete")
-    texto_lembrete_html = f"<b>🟠​ LEMBRETE</b>\n\n<b>\"{titulo}\"</b>"
+    texto_lembrete_html = f"<b>🟠​ LEMBRETE</b>\n<b>\"{titulo}\"</b>"
 
     # Envia a mensagem 3 vezes
     for i in range(3):
