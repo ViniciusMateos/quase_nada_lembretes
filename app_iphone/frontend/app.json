@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Quase Nada Lembretes",
+    "slug": "quase-nada-lembretes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.quasenada.lembretes",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification",
+          "fetch",
+          "remote-notification"
+        ],
+        "NSUserNotificationUsageDescription": "Usado para enviar lembretes no horário agendado.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.quasenada.lembretes"
+    },
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "1f724db0-72ef-4a9a-9ca4-6026fec5a1a1"
+      }
+    }
+  }
+}
