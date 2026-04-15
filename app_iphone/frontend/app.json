@@ -11,8 +11,6 @@
       "infoPlist": {
         "UIBackgroundModes": [
           "fetch",
-          "remote-notification",
-          "fetch",
           "remote-notification"
         ],
         "NSUserNotificationUsageDescription": "Usado para enviar lembretes no horário agendado.",
