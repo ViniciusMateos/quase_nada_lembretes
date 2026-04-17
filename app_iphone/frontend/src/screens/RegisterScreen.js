@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { register } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
+import ErrorBanner from '../components/ErrorBanner';
 
 const COLORS = {
   background: '#0A0A0F',
@@ -77,6 +78,7 @@ export default function RegisterScreen({ navigation }) {
 
   const [errors, setErrors] = useState({ name: null, email: null, password: null });
   const [apiError, setApiError] = useState(null);
+  const [rawError, setRawError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const validateAll = () => {
@@ -97,6 +99,7 @@ export default function RegisterScreen({ navigation }) {
 
   const handleSubmit = async () => {
     setApiError(null);
+    setRawError(null);
     if (!validateAll()) return;
 
     setIsLoading(true);
@@ -109,6 +112,7 @@ export default function RegisterScreen({ navigation }) {
       authLogin(data.access_token, data.user);
     } catch (error) {
       setApiError(getApiErrorMessage(error));
+      setRawError(error);
     } finally {
       setIsLoading(false);
     }
@@ -130,11 +134,7 @@ export default function RegisterScreen({ navigation }) {
             <Text style={styles.subtitle}>Bem-vindo ao Quase Nada Lembretes</Text>
           </View>
 
-          {apiError && (
-            <View style={styles.apiErrorContainer}>
-              <Text style={styles.apiErrorText}>{apiError}</Text>
-            </View>
-          )}
+          <ErrorBanner message={apiError} error={rawError} />
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Nome</Text>
