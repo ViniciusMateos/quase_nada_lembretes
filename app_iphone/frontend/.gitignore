@@ -19,6 +19,9 @@ android/.gradle/
 *.jks
 *.keystore
 
+# Expo
+.expo/
+
 # Metro bundler
 .metro-health-check*
 

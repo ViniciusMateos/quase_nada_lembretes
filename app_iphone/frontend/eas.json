@@ -8,11 +8,17 @@
       "distribution": "internal",
       "ios": {
         "resourceClass": "m-medium"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000"
       }
     },
     "production": {
       "ios": {
         "distribution": "store"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000"
       }
     }
   }
