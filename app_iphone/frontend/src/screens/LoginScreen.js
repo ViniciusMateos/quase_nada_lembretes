@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { login as apiLogin } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
+import ErrorBanner from '../components/ErrorBanner';
 
 const COLORS = {
   background: '#0A0A0F',
@@ -52,6 +53,7 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [apiError, setApiError] = useState(null);
+  const [rawError, setRawError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const [emailError, setEmailError] = useState(null);
@@ -79,6 +81,7 @@ export default function LoginScreen({ navigation }) {
 
   const handleSubmit = async () => {
     setApiError(null);
+    setRawError(null);
     if (!validateForm()) return;
 
     setIsLoading(true);
@@ -90,6 +93,7 @@ export default function LoginScreen({ navigation }) {
       authLogin(data.access_token, data.user);
     } catch (error) {
       setApiError(getApiErrorMessage(error));
+      setRawError(error);
     } finally {
       setIsLoading(false);
     }
@@ -111,11 +115,7 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.subtitle}>Acesse sua conta</Text>
           </View>
 
-          {apiError && (
-            <View style={styles.apiErrorContainer}>
-              <Text style={styles.apiErrorText}>{apiError}</Text>
-            </View>
-          )}
+          <ErrorBanner message={apiError} error={rawError} />
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>E-mail</Text>
