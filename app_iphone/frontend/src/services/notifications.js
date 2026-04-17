@@ -47,10 +47,11 @@ export async function checkPermission() {
 }
 
 /**
- * Cancela TODAS as notificações locais agendadas.
+ * Cancela TODAS as notificações locais (exibidas + agendadas).
  */
 export async function cancelAllNotifications() {
   try {
+    await notifee.cancelAllTriggerNotifications();
     await notifee.cancelAllNotifications();
   } catch (error) {
     console.warn('[Notifications] Erro ao cancelar notificações:', error);
