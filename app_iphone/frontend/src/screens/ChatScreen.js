@@ -160,10 +160,15 @@ export default function ChatScreen({ navigation }) {
     } catch (error) {
       setShowTyping(false);
 
+      const code = error?.code || '';
+      const status = error?.response?.status || '';
+      const url = error?.config ? `${error.config.baseURL || ''}${error.config.url || ''}` : '';
+      const detail = [status && `HTTP ${status}`, code, url].filter(Boolean).join(' · ');
+
       const errorMessage = {
         id: generateId(),
         role: 'assistant',
-        content: 'Ops! Não consegui me conectar. Verifique sua internet e tente novamente.',
+        content: `Ops! Não consegui me conectar. Verifique sua internet e tente novamente.\n\n[${detail || 'sem detalhes'}]`,
         timestamp: new Date().toISOString(),
       };
       addMessage(errorMessage);
@@ -218,6 +223,12 @@ export default function ChatScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Lembretes</Text>
+        <TouchableOpacity onPress={logout} hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
+          <Text style={styles.logoutButton}>Sair</Text>
+        </TouchableOpacity>
+      </View>
       {!hasNotifPermission && <NotificationPermissionBanner />}
 
       <KeyboardAvoidingView
@@ -296,6 +307,26 @@ const styles = StyleSheet.create({
     paddingTop: 80,
   },
   emptyText: { color: COLORS.textPlaceholder, fontSize: 15, fontFamily: 'System' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    fontFamily: 'System',
+  },
+  logoutButton: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontFamily: 'System',
+  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
