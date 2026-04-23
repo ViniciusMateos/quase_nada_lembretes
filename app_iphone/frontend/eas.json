@@ -4,6 +4,16 @@
     "appVersionSource": "local"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "ios": {
