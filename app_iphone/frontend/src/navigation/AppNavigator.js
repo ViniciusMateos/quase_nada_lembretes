@@ -1,23 +1,22 @@
-/**
- * Navegador principal do app.
- * - isLoading: splash enquanto verifica token salvo
- * - isAuthenticated: Stack protegido (Chat)
- * - !isAuthenticated: Stack de auth (Register como inicial, Login)
- */
-
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ChatScreen from '../screens/ChatScreen';
+import RemindersScreen from '../screens/RemindersScreen';
 
 const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
 
 const COLORS = {
   background: '#0A0A0F',
-  primary: '#7C3AED',
+  surface: '#1A1A1F',
+  primary: '#FF8234',
+  textSecondary: '#666',
+  border: '#2A2A2F',
 };
 
 function SplashScreen() {
@@ -44,16 +43,38 @@ function AuthStack() {
   );
 }
 
-function AppStack() {
+function AppTabs() {
   return (
-    <Stack.Navigator
+    <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: COLORS.background },
+        tabBarStyle: {
+          backgroundColor: COLORS.surface,
+          borderTopColor: COLORS.border,
+          borderTopWidth: 1,
+        },
+        tabBarActiveTintColor: COLORS.primary,
+        tabBarInactiveTintColor: COLORS.textSecondary,
+        tabBarLabelStyle: { fontSize: 12, fontFamily: 'System', fontWeight: '500' },
       }}
     >
-      <Stack.Screen name="Chat" component={ChatScreen} />
-    </Stack.Navigator>
+      <Tab.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{
+          tabBarLabel: 'Chat',
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>💬</Text>,
+        }}
+      />
+      <Tab.Screen
+        name="Lembretes"
+        component={RemindersScreen}
+        options={{
+          tabBarLabel: 'Lembretes',
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🔔</Text>,
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
@@ -64,7 +85,7 @@ export default function AppNavigator() {
     return <SplashScreen />;
   }
 
-  return isAuthenticated ? <AppStack /> : <AuthStack />;
+  return isAuthenticated ? <AppTabs /> : <AuthStack />;
 }
 
 const styles = StyleSheet.create({
