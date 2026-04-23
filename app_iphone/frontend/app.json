@@ -4,6 +4,7 @@
     "slug": "quase-nada-lembretes",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.quasenada.lembretes",
