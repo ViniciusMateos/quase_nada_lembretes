@@ -10,10 +10,27 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Known Issues
-- Interface do chat ainda sem feedback visual de lembretes criados
-- Sem tela de listagem dedicada para lembretes ativos
 - Sem opção de editar lembretes existentes
 - App expira em 7 dias se instalado via Sideloadly com conta gratuita Apple
+
+---
+
+## [0.2.0] - 2026-04-23
+
+### Added
+- Aba de Lembretes (Bottom Tab Navigator) — lista todos os lembretes ativos agrupados em "Próximos" (uma vez) e "Recorrentes", com pull-to-refresh e delete por item com confirmação
+- Saudação personalizada no Chat — bom dia/tarde/noite/madrugada com nome do usuário baseada no horário atual, exibida a cada abertura do chat
+- Logo do Quase Nada nas telas de Login e Cadastro — responsivo (40% da tela, max 160px), PNG com fundo transparente
+
+### Changed
+- Rebranding de cor: `#7C3AED` (roxo) → `#FF8234` (laranja) em toda a UI — LoginScreen, RegisterScreen, ChatScreen, AppNavigator
+- Dependência adicionada: `@react-navigation/bottom-tabs ^6.5.0`
+
+### Fixed
+- **BUG-FE-01:** Login com senha errada causava redirecionamento silencioso para a tela de login em vez de exibir mensagem de erro — interceptor axios corrigido para não chamar `logout()` em rotas `/auth/`
+- **BUG-FE-02:** Campo de texto do chat não limpava após envio no iOS — `inputRef.current?.clear()` adicionado para sincronizar o buffer nativo do TextInput multiline
+- **BUG-FE-03:** Campo de senha não limpava após erro de login — `setPassword('')` adicionado no catch de LoginScreen
+- **BUG-BE-01:** Lembretes `once` com horário vencido permaneciam com `is_active=1` no banco, causando spam de notificações ao fazer login — `sync_reminders` agora desativa esses lembretes via `UPDATE` antes do `SELECT`
 
 ---
 
