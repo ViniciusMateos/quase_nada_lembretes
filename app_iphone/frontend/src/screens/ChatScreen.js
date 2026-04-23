@@ -33,29 +33,39 @@ import NotificationPermissionBanner from '../components/NotificationPermissionBa
 const COLORS = {
   background: '#0A0A0F',
   surface: '#1A1A2E',
-  primary: '#7C3AED',
+  primary: '#FF8234',
   textPrimary: '#F1F5F9',
   textPlaceholder: '#475569',
   border: '#334155',
 };
 
-const WELCOME_MESSAGE = {
-  id: 'welcome',
-  role: 'assistant',
-  content:
-    'Oi! Sou o assistente do Quase Nada Lembretes 👋\nPosso criar lembretes, listar os que você tem e deletar quando quiser. Tente me mandar algo como:\n\n*Me lembra de tomar remédio amanhã às 8h*\n\nO que você precisa?',
-  timestamp: new Date().toISOString(),
-};
+function getGreeting(name) {
+  const hour = new Date().getHours();
+  let period;
+  if (hour >= 0 && hour < 4) period = 'Boa madrugada';
+  else if (hour >= 4 && hour < 12) period = 'Bom dia';
+  else if (hour >= 12 && hour < 18) period = 'Boa tarde';
+  else period = 'Boa noite';
+  return `${period}, ${name}! O que você deseja se lembrar?`;
+}
 
 function generateId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
 export default function ChatScreen({ navigation }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const flatListRef = useRef(null);
+  const inputRef = useRef(null);
 
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    {
+      id: 'greeting',
+      role: 'assistant',
+      content: getGreeting(user?.name || 'você'),
+      timestamp: new Date().toISOString(),
+    },
+  ]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
@@ -97,14 +107,7 @@ export default function ChatScreen({ navigation }) {
         await handleSync();
       }
 
-      // Onboarding — exibe boas-vindas apenas uma vez
-      if (isMounted) {
-        const onboardingDone = storage.getBoolean('onboarding_done');
-        if (!onboardingDone) {
-          setMessages([WELCOME_MESSAGE]);
-          storage.set('onboarding_done', true);
-        }
-      }
+      // Saudação já está no estado inicial de messages
     };
 
     init();
@@ -118,6 +121,7 @@ export default function ChatScreen({ navigation }) {
     if (!content || isLoading) return;
 
     setInputText('');
+    inputRef.current?.clear();
     setIsLoading(true);
 
     const userMessage = {
@@ -254,6 +258,7 @@ export default function ChatScreen({ navigation }) {
 
         <View style={styles.inputContainer}>
           <TextInput
+            ref={inputRef}
             style={styles.textInput}
             placeholder="Digite uma mensagem..."
             placeholderTextColor={COLORS.textPlaceholder}
