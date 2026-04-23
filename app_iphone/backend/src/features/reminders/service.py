@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.features.reminders.repository import (
@@ -160,6 +161,21 @@ async def sync_reminders(
     horizon_days: int = 30,
     max_per_reminder: int = 10,
 ) -> SyncResponse:
+    now = datetime.now(timezone.utc)
+
+    # Desativa lembretes 'once' cujo horário já passou — evita spam de notificações
+    await db.execute(
+        update(Reminder)
+        .where(
+            Reminder.user_id == user_id,
+            Reminder.recurrence == "once",
+            Reminder.next_execution < now.isoformat(),
+            Reminder.is_active == 1,
+        )
+        .values(is_active=0, updated_at=now.isoformat())
+    )
+    await db.commit()
+
     reminders = await get_active_reminders_for_user(db, user_id)
     scheduled = [
         ScheduledExecution(
