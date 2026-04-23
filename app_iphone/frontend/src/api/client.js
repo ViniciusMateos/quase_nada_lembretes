@@ -33,20 +33,26 @@ apiClient.interceptors.request.use(
 );
 
 // Interceptor de RESPONSE — trata 401 globalmente
+// Rotas de autenticação retornam 401 por credenciais inválidas (não sessão expirada)
+// e precisam que o erro chegue ao componente para exibir a mensagem de erro
 apiClient.interceptors.response.use(
   response => response,
   error => {
     if (error.response?.status === 401) {
-      // Limpa token salvo
-      storage.delete('auth_token');
-      storage.delete('auth_user');
+      const requestUrl = error.config?.url || '';
+      const isAuthRoute = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
 
-      // Redireciona para Login via navigation ref global
-      if (navigationRef.current) {
-        navigationRef.current.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
+      if (!isAuthRoute) {
+        // Sessão expirada em rota protegida — limpa e redireciona
+        storage.delete('auth_token');
+        storage.delete('auth_user');
+
+        if (navigationRef.current) {
+          navigationRef.current.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        }
       }
     }
     return Promise.reject(error);
