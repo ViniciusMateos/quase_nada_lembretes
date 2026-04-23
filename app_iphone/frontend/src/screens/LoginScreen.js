@@ -15,6 +15,8 @@ import {
   ScrollView,
   Platform,
   SafeAreaView,
+  Image,
+  useWindowDimensions,
 } from 'react-native';
 import { login as apiLogin } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
@@ -23,8 +25,8 @@ import ErrorBanner from '../components/ErrorBanner';
 const COLORS = {
   background: '#0A0A0F',
   surface: '#1A1A2E',
-  primary: '#7C3AED',
-  primaryLight: '#A78BFA',
+  primary: '#FF8234',
+  primaryLight: '#FFB380',
   error: '#EF4444',
   textPrimary: '#F1F5F9',
   textSecondary: '#94A3B8',
@@ -49,6 +51,8 @@ function getApiErrorMessage(error) {
 
 export default function LoginScreen({ navigation }) {
   const { login: authLogin } = useAuth();
+  const { width } = useWindowDimensions();
+  const logoSize = Math.min(width * 0.4, 160);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,6 +98,7 @@ export default function LoginScreen({ navigation }) {
     } catch (error) {
       setApiError(getApiErrorMessage(error));
       setRawError(error);
+      setPassword('');
     } finally {
       setIsLoading(false);
     }
@@ -110,6 +115,12 @@ export default function LoginScreen({ navigation }) {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <Image
+            source={require('../../assets/logo.png')}
+            style={{ width: logoSize, height: logoSize, resizeMode: 'contain', alignSelf: 'center', marginBottom: 24 }}
+            accessibilityLabel="Logo Quase Nada"
+          />
+
           <View style={styles.header}>
             <Text style={styles.title}>Entrar</Text>
             <Text style={styles.subtitle}>Acesse sua conta</Text>

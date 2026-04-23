@@ -15,6 +15,8 @@ import {
   ScrollView,
   Platform,
   SafeAreaView,
+  Image,
+  useWindowDimensions,
 } from 'react-native';
 import { register } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
@@ -24,8 +26,8 @@ const COLORS = {
   background: '#0A0A0F',
   surface: '#1A1A2E',
   surface2: '#16213E',
-  primary: '#7C3AED',
-  primaryLight: '#A78BFA',
+  primary: '#FF8234',
+  primaryLight: '#FFB380',
   success: '#10B981',
   error: '#EF4444',
   textPrimary: '#F1F5F9',
@@ -71,6 +73,8 @@ function getApiErrorMessage(error) {
 
 export default function RegisterScreen({ navigation }) {
   const { login: authLogin } = useAuth();
+  const { width } = useWindowDimensions();
+  const logoSize = Math.min(width * 0.4, 160);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -129,6 +133,12 @@ export default function RegisterScreen({ navigation }) {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <Image
+            source={require('../../assets/logo.png')}
+            style={{ width: logoSize, height: logoSize, resizeMode: 'contain', alignSelf: 'center', marginBottom: 24 }}
+            accessibilityLabel="Logo Quase Nada"
+          />
+
           <View style={styles.header}>
             <Text style={styles.title}>Criar conta</Text>
             <Text style={styles.subtitle}>Bem-vindo ao Quase Nada Lembretes</Text>
