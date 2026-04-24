@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import create_access_token, hash_password, verify_password
 from src.features.auth.repository import create_user, get_user_by_email
-from src.features.auth.schemas import AuthResponse, LoginRequest, RegisterRequest, UserResponse
+from src.features.auth.schemas import AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, UserResponse
 from src.models.models import User
 
 
@@ -60,3 +60,19 @@ async def login_user(db: AsyncSession, payload: LoginRequest) -> AuthResponse:
             detail={"detail": "Conta desativada.", "code": "INVALID_CREDENTIALS"},
         )
     return _build_auth_response(user)
+
+
+async def change_password(
+    db: AsyncSession,
+    user: User,
+    payload: ChangePasswordRequest,
+) -> dict:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"detail": "Senha atual incorreta.", "code": "INVALID_CURRENT_PASSWORD"},
+        )
+    user.password_hash = hash_password(payload.new_password)
+    user.updated_at = datetime.now(timezone.utc).isoformat()
+    await db.commit()
+    return {"message": "Senha alterada com sucesso."}

@@ -217,13 +217,27 @@ async def create_reminder_from_data(
     end_date_raw = dados.get("data_fim")
     titulo = dados.get("titulo", "Sem título")
 
+    def _interval_str(seconds: int | None) -> str:
+        if not seconds:
+            return "Intervalo"
+        if seconds % 86400 == 0:
+            days = seconds // 86400
+            return f"A cada {days} dia{'s' if days > 1 else ''}"
+        if seconds % 3600 == 0:
+            hours = seconds // 3600
+            return f"A cada {hours}h"
+        if seconds % 60 == 0:
+            mins = seconds // 60
+            return f"A cada {mins}min"
+        return f"A cada {seconds}s"
+
     recurrence_map = {
-        "once": "Uma vez",
+        "once": "Único",
         "daily": "Diariamente",
         "weekly": "Semanalmente",
         "monthly": "Mensalmente",
         "day_of_month": "Todo mês neste dia",
-        "interval_seconds": f"A cada {interval_seconds} segundos" if interval_seconds else "Intervalo",
+        "interval_seconds": _interval_str(interval_seconds),
     }
     recurrence_str = recurrence_map.get(recurrence, recurrence)
 
