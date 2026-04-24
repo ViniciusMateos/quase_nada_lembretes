@@ -11,7 +11,8 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "API_BASE_URL": "http://147.15.7.119:8000"
+        "API_BASE_URL": "http://147.15.7.119:8000",
+        "APP_VARIANT": "development"
       }
     },
     "preview": {
