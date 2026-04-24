@@ -62,7 +62,6 @@ async def process_message(
     user: User,
     payload: MessageRequest,
 ) -> MessageResponse:
-    now = datetime.now(timezone.utc)
     message_id = str(uuid.uuid4())
 
     await _save_history(db, user.id, "user", payload.content)
@@ -70,7 +69,7 @@ async def process_message(
     try:
         classification = await classify_intent(
             user_message=payload.content,
-            current_datetime=now.isoformat(),
+            current_datetime=payload.client_timestamp,
         )
     except Exception as e:
         raise HTTPException(
@@ -94,7 +93,10 @@ async def process_message(
             }
             proxima_execucao_dt = datetime.fromisoformat(reminder.next_execution)
             proxima_execucao_formatada = proxima_execucao_dt.strftime("%d/%m/%Y às %H:%M")
-            response_text = f"✅ Lembrete criado: *{reminder.title}* para {proxima_execucao_formatada}"
+            if reminder.recurrence and reminder.recurrence != "once":
+                response_text = f"Lembrete recorrente criado!\n{reminder.title.upper()}\na partir de: {proxima_execucao_formatada}"
+            else:
+                response_text = f"Lembrete criado!\n{reminder.title.upper()}\ndata: {proxima_execucao_formatada}"
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

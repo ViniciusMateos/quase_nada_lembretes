@@ -31,3 +31,8 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int = 604800  # 7 days in seconds
     user: UserResponse
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
