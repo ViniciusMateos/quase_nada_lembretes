@@ -31,3 +31,16 @@ export async function login({ email, password }) {
   });
   return response.data;
 }
+
+/**
+ * Altera a senha do usuário autenticado.
+ * @param {{ current_password: string, new_password: string }} data
+ * @returns {Promise<{ message: string }>}
+ */
+export async function changePassword({ current_password, new_password }) {
+  const response = await apiClient.put('/api/v1/auth/password', {
+    current_password,
+    new_password,
+  });
+  return response.data;
+}

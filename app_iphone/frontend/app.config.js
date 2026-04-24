@@ -28,7 +28,7 @@ export default {
         ? 'com.quasenada.lembretes.dev'
         : 'com.quasenada.lembretes',
     },
-    plugins: [],
+    plugins: ['expo-dev-client'],
     extra: {
       eas: {
         projectId: '1f724db0-72ef-4a9a-9ca4-6026fec5a1a1',
