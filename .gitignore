@@ -5,3 +5,4 @@ quasenadalembretes-0ead4ba60885.json
 # Ignorar pastas de cache do Python
 __pycache__/
 *.pyc
+app_iphone/ipa/
