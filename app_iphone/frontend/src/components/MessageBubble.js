@@ -1,28 +1,10 @@
-/**
- * Bolha de mensagem individual.
- * Usuário: direita, fundo violeta.
- * IA (assistant): esquerda, fundo surface.
- */
-
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-
-const COLORS = {
-  background: '#0A0A0F',
-  surface: '#1A1A2E',
-  primary: '#7C3AED',
-  textPrimary: '#F1F5F9',
-  textSecondary: '#94A3B8',
-};
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return '';
   try {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   } catch {
     return '';
   }
@@ -30,6 +12,20 @@ function formatTimestamp(timestamp) {
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === 'user';
+  const isReminderCreated = message.action?.type === 'reminder_created';
+
+  if (isReminderCreated) {
+    return (
+      <View style={[styles.wrapper, styles.wrapperAssistant]}>
+        <View style={styles.bubbleReminder}>
+          <Text style={styles.contentReminder}>{message.content}</Text>
+        </View>
+        <Text style={[styles.timestamp, styles.timestampAssistant]}>
+          {formatTimestamp(message.timestamp)}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.wrapper, isUser ? styles.wrapperUser : styles.wrapperAssistant]}>
@@ -65,12 +61,21 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   bubbleUser: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#FF8234',
     borderBottomRightRadius: 4,
   },
   bubbleAssistant: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: '#1A1A2E',
     borderBottomLeftRadius: 4,
+  },
+  bubbleReminder: {
+    borderRadius: 14,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 130, 52, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 130, 52, 0.35)',
   },
   content: {
     fontSize: 15,
@@ -81,11 +86,18 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   contentAssistant: {
-    color: COLORS.textPrimary,
+    color: '#F1F5F9',
+  },
+  contentReminder: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: 'System',
+    color: '#FF8234',
+    fontWeight: '600',
   },
   timestamp: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: '#94A3B8',
     marginTop: 3,
   },
   timestampUser: {

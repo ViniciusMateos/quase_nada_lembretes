@@ -1,28 +1,22 @@
-import React from 'react';
-import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ChatScreen from '../screens/ChatScreen';
 import RemindersScreen from '../screens/RemindersScreen';
+import AccountScreen from '../screens/AccountScreen';
+import ChangePasswordScreen from '../screens/ChangePasswordScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-const COLORS = {
-  background: '#0A0A0F',
-  surface: '#1A1A1F',
-  primary: '#FF8234',
-  textSecondary: '#666',
-  border: '#2A2A2F',
-};
-
 function SplashScreen() {
   return (
     <View style={styles.splash}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
+      <ActivityIndicator size="large" color="#FF8234" />
     </View>
   );
 }
@@ -33,7 +27,7 @@ function AuthStack() {
       initialRouteName="Register"
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: COLORS.background },
+        contentStyle: { backgroundColor: '#0A0A0F' },
         animation: 'slide_from_right',
       }}
     >
@@ -44,17 +38,19 @@ function AuthStack() {
 }
 
 function AppTabs() {
+  const { theme } = useTheme();
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: COLORS.surface,
-          borderTopColor: COLORS.border,
+          backgroundColor: theme.tabBar,
+          borderTopColor: theme.tabBarBorder,
           borderTopWidth: 1,
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textSecondary,
+        tabBarActiveTintColor: theme.primary,
+        tabBarInactiveTintColor: theme.textSecondary,
         tabBarLabelStyle: { fontSize: 12, fontFamily: 'System', fontWeight: '500' },
       }}
     >
@@ -63,7 +59,12 @@ function AppTabs() {
         component={ChatScreen}
         options={{
           tabBarLabel: 'Chat',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>💬</Text>,
+          tabBarIcon: ({ color }) => (
+            <Image
+              source={require('../../assets/icon-chat.png')}
+              style={{ width: 24, height: 24, tintColor: color }}
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -71,10 +72,25 @@ function AppTabs() {
         component={RemindersScreen}
         options={{
           tabBarLabel: 'Lembretes',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🔔</Text>,
+          tabBarIcon: ({ color }) => (
+            <Image
+              source={require('../../assets/icon-lembretes.png')}
+              style={{ width: 24, height: 24, tintColor: color }}
+            />
+          ),
         }}
       />
     </Tab.Navigator>
+  );
+}
+
+function AppStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+      <Stack.Screen name="Main" component={AppTabs} />
+      <Stack.Screen name="Account" component={AccountScreen} />
+      <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+    </Stack.Navigator>
   );
 }
 
@@ -85,13 +101,13 @@ export default function AppNavigator() {
     return <SplashScreen />;
   }
 
-  return isAuthenticated ? <AppTabs /> : <AuthStack />;
+  return isAuthenticated ? <AppStack /> : <AuthStack />;
 }
 
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#0A0A0F',
     alignItems: 'center',
     justifyContent: 'center',
   },
