@@ -15,6 +15,27 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [0.3.0] - 2026-04-24
+
+### Added
+- Tema claro/escuro com persistencia local no app
+- Menu hamburguer com Conta, Alterar Senha e Sair
+- Endpoint `PUT /api/v1/auth/password` para troca de senha autenticada
+- Setup de Docker + CI/CD + deploy Oracle via SSH documentado
+
+### Changed
+- Mensagem de lembrete criado com destaque visual no chat
+- Labels de recorrencia mais legiveis (`Unico`, `A cada 4h`, etc.)
+- Prompt de IA reforcado para distinguir lembretes unicos vs recorrentes
+
+### Fixed
+- BUG-01: lista atualiza apos deletar sem reiniciar app
+- BUG-02: cor das mensagens do usuario ajustada para `#FF8234`
+- BUG-03: logo reduzida em Login/Register
+- BUG-04: IA para de classificar lembrete unico como recorrente
+- BUG-05: correcao de fuso horario usando `client_timestamp`
+
+---
 ## [0.2.0] - 2026-04-23
 
 ### Added
@@ -80,3 +101,4 @@ Versão original do projeto — bot no Telegram para gerenciamento de lembretes 
 - Correções de fuso horário (America/São_Paulo)
 - Normalização de títulos para busca e deduplicação
 - Rotação automática de modelos Gemini em caso de quota esgotada
+
