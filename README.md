@@ -136,6 +136,12 @@ npx eas login
 eas build --platform ios --profile preview
 ```
 
+### Regras de release (Expo/Metro)
+
+- `npx expo start` e Metro cobrem desenvolvimento local e mudanças JavaScript.
+- `eas update` (OTA) deve ser usado apenas para mudanças sem dependências nativas.
+- Quando entrar dependência nativa (ex.: `react-native-pager-view`), é obrigatório gerar novo build iOS com `eas build`.
+
 Após o build (~15 minutos), a Expo disponibilizará um link para download do arquivo `.ipa`. Instale no iPhone com [Sideloadly](https://sideloadly.io/) (Windows/Mac).
 
 **Instalando com Sideloadly:**
