@@ -15,6 +15,24 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [0.4.0] - 2026-04-27
+
+### Added
+- NavegaÃ§Ã£o por swipe entre as abas Chat e Lembretes
+- Toggle de tema (sol/lua) no menu hamburguer
+- Ãcone de conta e botÃ£o de visualizar senha nas telas de autenticaÃ§Ã£o
+
+### Changed
+- Menu hamburguer compartilhado entre Chat e Lembretes
+- Frontend preparado para uso de `@react-navigation/material-top-tabs` e `react-native-pager-view`
+
+### Fixed
+- Scheduler backend com timezone UTC explÃ­cito (`AsyncIOScheduler(timezone=pytz.utc)`)
+- DependÃªncia `pytz` adicionada ao backend para suporte consistente de timezone
+- Ajustes de tema em componentes de mensagens e tela de lembretes
+
+---
+
 ## [0.3.0] - 2026-04-24
 
 ### Added
