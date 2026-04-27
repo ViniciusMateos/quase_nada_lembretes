@@ -29,6 +29,8 @@ docs: update deployment and rollback guide
 - [ ] sem segredo hardcoded
 - [ ] changelog atualizado
 - [ ] API docs atualizadas quando endpoint mudar
+- [ ] README atualizado quando fluxo de release/deploy mudar
+- [ ] Para release com dependência nativa no app iOS, plano de `eas build` descrito no PR
 
 ## Processo de review
 1. Abrir PR com contexto claro.
