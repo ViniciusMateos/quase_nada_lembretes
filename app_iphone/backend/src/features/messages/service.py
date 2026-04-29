@@ -92,6 +92,14 @@ async def process_message(
                 "reminder": ReminderOut.from_orm(reminder).model_dump(),
             }
             proxima_execucao_dt = datetime.fromisoformat(reminder.next_execution)
+            if proxima_execucao_dt.tzinfo is None:
+                proxima_execucao_dt = proxima_execucao_dt.replace(tzinfo=timezone.utc)
+            try:
+                client_dt = datetime.fromisoformat(payload.client_timestamp)
+                if client_dt.tzinfo is not None:
+                    proxima_execucao_dt = proxima_execucao_dt.astimezone(client_dt.tzinfo)
+            except Exception:
+                pass
             proxima_execucao_formatada = proxima_execucao_dt.strftime("%d/%m/%Y às %H:%M")
             if reminder.recurrence and reminder.recurrence != "once":
                 response_text = f"Lembrete recorrente criado!\n{reminder.title.upper()}\na partir de: {proxima_execucao_formatada}"
@@ -161,6 +169,10 @@ async def process_message(
         action = None
 
     await _save_history(db, user.id, "assistant", response_text, intent=intent, model_used=model_used)
+
+    # Commit explícito antes de retornar: garante que o reminder já está no banco
+    # quando o app chamar /sync imediatamente após receber a resposta.
+    await db.commit()
 
     return MessageResponse(
         message_id=message_id,
