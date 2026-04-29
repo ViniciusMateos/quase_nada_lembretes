@@ -125,6 +125,19 @@ async def list_reminders(
     limit: int = 50,
     offset: int = 0,
 ) -> ReminderListResponse:
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(Reminder)
+        .where(
+            Reminder.user_id == user_id,
+            Reminder.recurrence == "once",
+            Reminder.next_execution < now.isoformat(),
+            Reminder.is_active == 1,
+        )
+        .values(is_active=0, updated_at=now.isoformat())
+    )
+    await db.commit()
+
     reminders, total = await get_reminders_by_user(db, user_id, active_only, limit, offset)
     return ReminderListResponse(
         reminders=[ReminderOut.from_orm(r) for r in reminders],
@@ -162,14 +175,16 @@ async def sync_reminders(
     max_per_reminder: int = 10,
 ) -> SyncResponse:
     now = datetime.now(timezone.utc)
+    # Grace period: só desativa 'once' que venceu há mais de 5 minutos.
+    # Evita matar lembretes recém-criados antes do app agendar a notificação local.
+    grace_cutoff = (now - timedelta(minutes=5)).isoformat()
 
-    # Desativa lembretes 'once' cujo horário já passou — evita spam de notificações
     await db.execute(
         update(Reminder)
         .where(
             Reminder.user_id == user_id,
             Reminder.recurrence == "once",
-            Reminder.next_execution < now.isoformat(),
+            Reminder.next_execution < grace_cutoff,
             Reminder.is_active == 1,
         )
         .values(is_active=0, updated_at=now.isoformat())
@@ -209,6 +224,8 @@ async def create_reminder_from_data(
         next_exec = datetime.fromisoformat(data_hora_raw)
         if next_exec.tzinfo is None:
             next_exec = next_exec.replace(tzinfo=timezone.utc)
+        else:
+            next_exec = next_exec.astimezone(timezone.utc)
     else:
         next_exec = now + timedelta(hours=1)
 
