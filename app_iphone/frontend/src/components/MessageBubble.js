@@ -10,15 +10,51 @@ function formatTimestamp(timestamp) {
   }
 }
 
+function formatLocalDatetime(isoString) {
+  if (!isoString) return '';
+  try {
+    return new Date(isoString).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
 export default function MessageBubble({ message }) {
   const isUser = message.role === 'user';
   const isReminderCreated = message.action?.type === 'reminder_created';
+  const isError = message.isError === true;
 
   if (isReminderCreated) {
+    const reminder = message.action?.reminder;
+    const isRecurring = reminder?.recurrence && reminder.recurrence !== 'once';
+    const title = reminder?.title?.toUpperCase() || '';
+    const timeLabel = isRecurring ? 'a partir de' : 'data';
+    const timeStr = formatLocalDatetime(reminder?.next_execution);
+    const displayText = `Lembrete criado!\n${title}\n${timeLabel}: ${timeStr}`;
+
     return (
       <View style={[styles.wrapper, styles.wrapperAssistant]}>
         <View style={styles.bubbleReminder}>
-          <Text style={styles.contentReminder}>{message.content}</Text>
+          <Text style={styles.contentReminder}>{displayText}</Text>
+        </View>
+        <Text style={[styles.timestamp, styles.timestampAssistant]}>
+          {formatTimestamp(message.timestamp)}
+        </Text>
+      </View>
+    );
+  }
+
+  if (isError) {
+    return (
+      <View style={[styles.wrapper, styles.wrapperAssistant]}>
+        <View style={styles.bubbleError}>
+          <Text style={styles.contentError}>{message.content}</Text>
         </View>
         <Text style={[styles.timestamp, styles.timestampAssistant]}>
           {formatTimestamp(message.timestamp)}
@@ -93,6 +129,22 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: 'System',
     color: '#FF8234',
+    fontWeight: '600',
+  },
+  bubbleError: {
+    borderRadius: 14,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+  },
+  contentError: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: 'System',
+    color: '#EF4444',
     fontWeight: '600',
   },
   timestamp: {

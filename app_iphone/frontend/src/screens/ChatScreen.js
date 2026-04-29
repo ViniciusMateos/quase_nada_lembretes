@@ -261,18 +261,48 @@ export default function ChatScreen({ navigation }) {
     } catch (error) {
       setShowTyping(false);
 
-      const code = error?.code || '';
-      const status = error?.response?.status || '';
-      const url = error?.config ? `${error.config.baseURL || ''}${error.config.url || ''}` : '';
-      const detail = [status && `HTTP ${status}`, code, url].filter(Boolean).join(' · ');
+      const isNetworkError = !error?.response;
 
-      addMessage({
-        id: generateId(),
-        role: 'assistant',
-        content: `Ops! Não consegui me conectar. Verifique sua internet e tente novamente.\n\n[${detail || 'sem detalhes'}]`,
-        timestamp: new Date().toISOString(),
-        action: null,
-      });
+      if (isNetworkError) {
+        // Conexão caiu — servidor pode ter processado. Tenta sync antes de mostrar erro.
+        try {
+          const syncData = await syncReminders();
+          await scheduleFromSync(syncData);
+          addMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: 'Conexão caiu durante o envio, mas sincronizei com o servidor.\nSe você criou um lembrete, ele já está agendado.',
+            timestamp: new Date().toISOString(),
+            action: null,
+          });
+        } catch {
+          addMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: 'Não consegui me conectar ao servidor.\nTente novamente.',
+            timestamp: new Date().toISOString(),
+            action: null,
+            isError: true,
+          });
+        }
+      } else {
+        const errCode = error?.code?.toUpperCase() || '';
+        const errStatus = error?.response?.status;
+        let errLine = '';
+        if (errCode && errStatus) errLine = `${errCode} · ${errStatus}`;
+        else if (errCode) errLine = errCode;
+        else if (errStatus) errLine = `ERRO ${errStatus}`;
+        else errLine = 'ERRO DESCONHECIDO';
+
+        addMessage({
+          id: generateId(),
+          role: 'assistant',
+          content: `Não consegui me conectar ao servidor.\n${errLine}\nTente novamente.`,
+          timestamp: new Date().toISOString(),
+          action: null,
+          isError: true,
+        });
+      }
       console.warn('[ChatScreen] Erro ao enviar mensagem:', error);
     } finally {
       setIsLoading(false);
