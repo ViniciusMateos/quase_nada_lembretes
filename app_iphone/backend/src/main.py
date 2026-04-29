@@ -41,7 +41,8 @@ async def _process_due_reminders() -> None:
     from src.features.reminders.service import calcular_proxima_execucao
     from sqlalchemy import select
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
 
     async with AsyncSessionLocal() as db:
         try:
@@ -54,10 +55,14 @@ async def _process_due_reminders() -> None:
             due_reminders = list(result.scalars().all())
 
             for reminder in due_reminders:
-                from_dt = datetime.fromisoformat(reminder.next_execution)
-                if from_dt.tzinfo is None:
-                    from_dt = from_dt.replace(tzinfo=timezone.utc)
-                next_dt = calcular_proxima_execucao(reminder, from_dt)
+                current_dt = datetime.fromisoformat(reminder.next_execution)
+                if current_dt.tzinfo is None:
+                    current_dt = current_dt.replace(tzinfo=timezone.utc)
+
+                # Avança em loop até o próximo horário futuro (corrige reminders presos no passado)
+                next_dt = calcular_proxima_execucao(reminder, current_dt)
+                while next_dt is not None and next_dt <= now:
+                    next_dt = calcular_proxima_execucao(reminder, next_dt)
 
                 if next_dt is None:
                     reminder.is_active = 0
