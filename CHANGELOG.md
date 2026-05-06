@@ -10,8 +10,32 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Known Issues
-- Sem opção de editar lembretes existentes
 - App expira em 7 dias se instalado via Sideloadly com conta gratuita Apple
+
+---
+
+## [0.6.0] - 2026-05-06
+
+### Added
+- Web Preview local do app iOS via Expo SDK 51 e React Native Web.
+- Script `npm run web` no frontend para iniciar a preview no browser.
+- `metro.config.js` com aliases web para `react-native-mmkv` e `@notifee/react-native` somente em `platform === 'web'`.
+- Stub web de MMKV usando `localStorage` para persistir tokens durante a preview.
+- Stub web de Notifee para evitar quebra do bundle no browser.
+- `notifications.web.js` com toast visual simulando notificacoes locais no browser.
+
+### Changed
+- Frontend passa a incluir `@expo/metro-runtime`, `react-dom` e `react-native-web` compativeis com Expo SDK 51.
+- `axios` atualizado para `1.16.0`.
+- Opcoes iOS-only de `Alert.alert` agora ficam condicionadas a `Platform.OS === 'ios'`.
+- API do frontend centralizada em `API_BASE_URL`, usada por iOS/Android, builds EAS e preview web local.
+
+### Security
+- Toast de notificacao web usa `textContent` em vez de `innerHTML`, evitando interpolacao HTML com titulos vindos do backend.
+
+### Validation
+- `npx expo export --platform web --output-dir dist-web-qa` validado com sucesso.
+- `npm audit --omit=dev --audit-level=high` ainda aponta vulnerabilidades transientes em dependencias Expo/React Native.
 
 ---
 

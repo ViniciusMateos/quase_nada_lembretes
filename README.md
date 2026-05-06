@@ -136,6 +136,51 @@ npx eas login
 eas build --platform ios --profile preview
 ```
 
+### Web Preview local (browser)
+
+Use este fluxo para visualizar o app iOS no navegador antes de gerar um build EAS.
+
+```bash
+# Terminal 1 - backend
+cd app_iphone/backend
+venv\Scripts\activate
+python init_db.py
+uvicorn src.main:app --reload --port 8000
+
+# Terminal 2 - frontend web
+cd app_iphone/frontend
+npm install
+npm run web
+```
+
+Configure o backend local para aceitar as portas do Expo web:
+
+```env
+CORS_ORIGINS=http://localhost:8081,http://localhost:19006,http://127.0.0.1:8081,http://127.0.0.1:19006
+```
+
+Configure o frontend local para chamar o backend:
+
+```env
+API_BASE_URL=http://147.15.7.119:8000
+```
+
+`API_BASE_URL` e usado pelo app iOS/Android, pelos builds EAS e pela preview web local.
+
+A preview web usa `metro.config.js` para trocar bibliotecas nativas por stubs apenas em `platform === 'web'`:
+
+- `react-native-mmkv` -> `src/stubs/mmkv.web.js`
+- `@notifee/react-native` -> `src/stubs/notifee.web.js`
+- notificacoes locais -> `src/services/notifications.web.js` com toast visual
+
+Para validar o bundle web sem abrir servidor interativo:
+
+```bash
+npx expo export --platform web --output-dir dist-web-qa
+```
+
+`dist-web-qa/` e apenas artefato temporario de QA e pode ser removido apos a validacao.
+
 ### Regras de release (Expo/Metro)
 
 - `npx expo start` e Metro cobrem desenvolvimento local e mudanças JavaScript.
