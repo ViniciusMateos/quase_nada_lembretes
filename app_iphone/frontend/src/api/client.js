@@ -1,18 +1,21 @@
-/**
- * Cliente HTTP centralizado.
- * Todas as chamadas de API passam por aqui.
- * Token JWT injetado via interceptor de request.
- * 401 → limpa sessão e redireciona para Login.
- */
-
 import axios from 'axios';
 import { storage } from '../context/AuthContext';
 
-// Reference de navegação global para redirecionar sem hook
 export const navigationRef = { current: null };
+const API_BASE_URL = process.env.API_BASE_URL;
+
+let logoutCallback = null;
+export function registerLogout(fn) {
+  logoutCallback = fn;
+}
+
+let updateTokensCallback = null;
+export function registerUpdateTokens(fn) {
+  updateTokensCallback = fn;
+}
 
 const apiClient = axios.create({
-  baseURL: process.env.API_BASE_URL,
+  baseURL: API_BASE_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -20,7 +23,7 @@ const apiClient = axios.create({
   },
 });
 
-// Interceptor de REQUEST — injeta token JWT
+// Injeta access token em cada request
 apiClient.interceptors.request.use(
   config => {
     const token = storage.getString('auth_token');
@@ -32,29 +35,83 @@ apiClient.interceptors.request.use(
   error => Promise.reject(error),
 );
 
-// Interceptor de RESPONSE — trata 401 globalmente
-// Rotas de autenticação retornam 401 por credenciais inválidas (não sessão expirada)
-// e precisam que o erro chegue ao componente para exibir a mensagem de erro
+// Controle de refresh concorrente — requests que chegam enquanto já está refreshando ficam na fila
+let isRefreshing = false;
+let refreshQueue = [];
+
+function processQueue(error, token = null) {
+  refreshQueue.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error);
+    } else {
+      resolve(token);
+    }
+  });
+  refreshQueue = [];
+}
+
+// Interceptor de RESPONSE — em 401, tenta refresh silencioso antes de deslogar
 apiClient.interceptors.response.use(
   response => response,
-  error => {
-    if (error.response?.status === 401) {
-      const requestUrl = error.config?.url || '';
-      const isAuthRoute = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+  async error => {
+    const originalConfig = error.config;
+    const requestUrl = originalConfig?.url || '';
 
-      if (!isAuthRoute) {
-        // Sessão expirada em rota protegida — limpa e redireciona
-        storage.delete('auth_token');
-        storage.delete('auth_user');
+    const isAuthRoute =
+      requestUrl.includes('/auth/login') ||
+      requestUrl.includes('/auth/register') ||
+      requestUrl.includes('/auth/refresh');
 
-        if (navigationRef.current) {
-          navigationRef.current.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
+    if (error.response?.status === 401 && !isAuthRoute && !originalConfig._retry) {
+      const storedRefreshToken = storage.getString('refresh_token');
+
+      if (!storedRefreshToken) {
+        if (logoutCallback) logoutCallback();
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        // Enfileira enquanto já está renovando
+        return new Promise((resolve, reject) => {
+          refreshQueue.push({ resolve, reject });
+        }).then(newToken => {
+          originalConfig.headers.Authorization = `Bearer ${newToken}`;
+          return apiClient(originalConfig);
+        });
+      }
+
+      originalConfig._retry = true;
+      isRefreshing = true;
+
+      try {
+        const response = await axios.post(
+          `${API_BASE_URL}/api/v1/auth/refresh`,
+          { refresh_token: storedRefreshToken },
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+
+        const { access_token, refresh_token } = response.data;
+
+        storage.set('auth_token', access_token);
+        storage.set('refresh_token', refresh_token);
+
+        if (updateTokensCallback) {
+          updateTokensCallback(access_token, refresh_token);
         }
+
+        processQueue(null, access_token);
+
+        originalConfig.headers.Authorization = `Bearer ${access_token}`;
+        return apiClient(originalConfig);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        if (logoutCallback) logoutCallback();
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
+
     return Promise.reject(error);
   },
 );

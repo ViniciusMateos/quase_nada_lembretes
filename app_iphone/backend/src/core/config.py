@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="SQLAlchemy async database URL")
     jwt_secret: str = Field(..., min_length=32, description="JWT signing secret (min 32 chars)")
     jwt_algorithm: str = Field(default="HS256")
-    jwt_expire_days: int = Field(default=7, ge=1)
+    jwt_expire_minutes: int = Field(default=60, ge=1)
+    refresh_token_expire_days: int = Field(default=90, ge=1)
     google_api_key: str = Field(..., description="Google Gemini API key")
     # SEGURANÇA (OWASP A05): Em produção, NUNCA use "*". Defina as origens permitidas
     # explicitamente em CORS_ORIGINS, separadas por vírgula.

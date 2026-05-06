@@ -17,6 +17,7 @@ class User(Base):
 
     reminders = relationship("Reminder", back_populates="user", cascade="all, delete-orphan")
     chat_history = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (Index("idx_users_email", "email"),)
 
@@ -62,4 +63,22 @@ class ChatHistory(Base):
     __table_args__ = (
         Index("idx_chat_history_user_id", "user_id"),
         Index("idx_chat_history_user_created", "user_id", "created_at"),
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    expires_at = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    revoked = Column(Integer, nullable=False, default=0)
+
+    user = relationship("User", back_populates="refresh_tokens")
+
+    __table_args__ = (
+        Index("idx_refresh_tokens_token_hash", "token_hash"),
+        Index("idx_refresh_tokens_user_id", "user_id"),
     )

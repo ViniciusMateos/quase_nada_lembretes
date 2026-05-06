@@ -33,6 +33,16 @@ export async function login({ email, password }) {
 }
 
 /**
+ * Troca um refresh token expirado por novos access + refresh tokens.
+ * @param {{ refresh_token: string }} data
+ * @returns {Promise<{ access_token: string, refresh_token: string, expires_in: number }>}
+ */
+export async function refreshTokens({ refresh_token }) {
+  const response = await apiClient.post('/api/v1/auth/refresh', { refresh_token });
+  return response.data;
+}
+
+/**
  * Altera a senha do usuário autenticado.
  * @param {{ current_password: string, new_password: string }} data
  * @returns {Promise<{ message: string }>}

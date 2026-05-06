@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,7 +20,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(data: dict[str, Any]) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expire_days)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     payload = {
         **data,
         "iat": datetime.now(timezone.utc),
@@ -29,7 +31,6 @@ def create_access_token(data: dict[str, Any]) -> str:
 
 def decode_access_token(token: str) -> dict[str, Any]:
     """
-    Decode and validate a JWT token.
     Raises jwt.ExpiredSignatureError or jwt.InvalidTokenError on failure.
     """
     return jwt.decode(
@@ -37,3 +38,11 @@ def decode_access_token(token: str) -> dict[str, Any]:
         settings.jwt_secret,
         algorithms=[settings.jwt_algorithm],
     )
+
+
+def generate_refresh_token() -> str:
+    return secrets.token_urlsafe(64)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()

@@ -28,9 +28,20 @@ class UserResponse(BaseModel):
 
 class AuthResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
-    expires_in: int = 604800  # 7 days in seconds
+    expires_in: int = 3600  # 60 min in seconds
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int = 3600
 
 
 class ChangePasswordRequest(BaseModel):

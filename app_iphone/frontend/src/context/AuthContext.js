@@ -6,6 +6,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { MMKV } from 'react-native-mmkv';
+import { registerLogout, registerUpdateTokens } from '../api/client';
 
 // Instância de storage persistente (importada também pelo client.js)
 export const storage = new MMKV();
@@ -15,10 +16,8 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
-  // isLoading = true enquanto verifica token salvo no storage
   const [isLoading, setIsLoading] = useState(true);
 
-  // Ao montar: verifica se existe sessão salva
   useEffect(() => {
     try {
       const savedToken = storage.getString('auth_token');
@@ -28,36 +27,39 @@ export function AuthProvider({ children }) {
         setToken(savedToken);
         setUser(JSON.parse(savedUserRaw));
       }
-    } catch (error) {
-      // Token corrompido — ignora e segue não autenticado
+    } catch {
       storage.delete('auth_token');
       storage.delete('auth_user');
+      storage.delete('refresh_token');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  /**
-   * Persiste sessão após login ou cadastro.
-   * @param {string} newToken
-   * @param {object} newUser
-   */
-  const login = (newToken, newUser) => {
+  const login = (newToken, newUser, newRefreshToken) => {
     storage.set('auth_token', newToken);
     storage.set('auth_user', JSON.stringify(newUser));
+    if (newRefreshToken) storage.set('refresh_token', newRefreshToken);
     setToken(newToken);
     setUser(newUser);
   };
 
-  /**
-   * Limpa sessão e remove dados persistidos.
-   */
   const logout = () => {
     storage.delete('auth_token');
     storage.delete('auth_user');
+    storage.delete('refresh_token');
     setToken(null);
     setUser(null);
   };
+
+  useEffect(() => {
+    registerLogout(logout);
+    registerUpdateTokens((newAccessToken, newRefreshToken) => {
+      storage.set('auth_token', newAccessToken);
+      storage.set('refresh_token', newRefreshToken);
+      setToken(newAccessToken);
+    });
+  }, []);
 
   const isAuthenticated = !!token;
 
