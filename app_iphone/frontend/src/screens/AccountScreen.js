@@ -1,42 +1,47 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  Animated,
+  Dimensions,
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   SafeAreaView,
-  Alert,
-  Image,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import ConfirmDialog from '../components/ConfirmDialog';
+import ChevronIcon from '../components/ChevronIcon';
+import PressableScale from '../components/PressableScale';
 
 export default function AccountScreen({ navigation }) {
   const { user, logout } = useAuth();
   const { theme } = useTheme();
   const styles = makeStyles(theme);
+  const screenTranslateX = useRef(new Animated.Value(0)).current;
+  const [confirmLogoutVisible, setConfirmLogoutVisible] = useState(false);
+
+  const handleGoBack = () => {
+    Animated.timing(screenTranslateX, {
+      toValue: Dimensions.get('window').width,
+      duration: 260,
+      useNativeDriver: true,
+    }).start(() => navigation.goBack());
+  };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Sair', style: 'destructive', onPress: logout },
-      ],
-      { userInterfaceStyle: theme.isDark ? 'dark' : 'light' },
-    );
+    setConfirmLogoutVisible(true);
   };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
-          <Text style={styles.backButton}>‹ Voltar</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Conta</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <Animated.View style={[styles.screen, { transform: [{ translateX: screenTranslateX }] }]}>
+        <View style={styles.header}>
+          <PressableScale onPress={handleGoBack} hitSlop={{ top: 10, bottom: 10, left: 18, right: 18 }}>
+            <ChevronIcon color={theme.primary} size={38} style={styles.backButton} />
+          </PressableScale>
+          <Text style={styles.headerTitle}>Conta</Text>
+          <View style={{ width: 44 }} />
+        </View>
 
       <View style={styles.profileSection}>
         <View style={styles.avatarContainer}>
@@ -51,21 +56,34 @@ export default function AccountScreen({ navigation }) {
       </View>
 
       <View style={styles.section}>
-        <TouchableOpacity
+        <PressableScale
           style={styles.menuItem}
           onPress={() => navigation.navigate('ChangePassword')}
-          activeOpacity={0.7}
         >
           <Text style={styles.menuItemText}>Alterar senha</Text>
-          <Text style={styles.menuItemArrow}>›</Text>
-        </TouchableOpacity>
+          <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
+        </PressableScale>
       </View>
 
       <View style={styles.logoutSection}>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
+        <PressableScale style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutButtonText}>Sair</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
+
+      <ConfirmDialog
+        visible={confirmLogoutVisible}
+        title="Sair da conta"
+        message="Tem certeza que deseja sair?"
+        confirmText="Sair"
+        destructive
+        onCancel={() => setConfirmLogoutVisible(false)}
+        onConfirm={() => {
+          setConfirmLogoutVisible(false);
+          logout();
+        }}
+      />
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -73,6 +91,7 @@ export default function AccountScreen({ navigation }) {
 function makeStyles(theme) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: theme.background },
+    screen: { flex: 1, backgroundColor: theme.background },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -89,10 +108,8 @@ function makeStyles(theme) {
       fontFamily: 'System',
     },
     backButton: {
-      fontSize: 17,
-      color: theme.primary,
-      fontFamily: 'System',
-      width: 60,
+      width: 44,
+      textAlign: 'center',
     },
     profileSection: {
       alignItems: 'center',
@@ -143,11 +160,6 @@ function makeStyles(theme) {
     menuItemText: {
       fontSize: 16,
       color: theme.textPrimary,
-      fontFamily: 'System',
-    },
-    menuItemArrow: {
-      fontSize: 20,
-      color: theme.textSecondary,
       fontFamily: 'System',
     },
     logoutSection: {

@@ -12,12 +12,14 @@ from src.features.reminders.repository import (
     get_active_reminders_for_user,
     get_reminder_by_id,
     get_reminders_by_user,
+    save_reminder,
     search_reminders_by_title,
 )
 from src.features.reminders.schemas import (
     ReminderDeleteResponse,
     ReminderListResponse,
     ReminderOut,
+    ReminderUpdate,
     ScheduledExecution,
     SyncResponse,
 )
@@ -166,6 +168,52 @@ async def remove_reminder(
     title = reminder.title
     await delete_reminder(db, reminder)
     return ReminderDeleteResponse(id=reminder_id, title=title, deleted=True)
+
+
+async def update_reminder(
+    db: AsyncSession,
+    reminder_id: str,
+    user_id: str,
+    data: ReminderUpdate,
+) -> ReminderOut:
+    reminder = await get_reminder_by_id(db, reminder_id)
+    if not reminder:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "Lembrete não encontrado.", "code": "REMINDER_NOT_FOUND"},
+        )
+    if reminder.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"detail": "Este lembrete não pertence a você.", "code": "NOT_YOUR_REMINDER"},
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    if data.title is not None:
+        reminder.title = data.title
+        reminder.title_normalized = _normalize(data.title)
+
+    if data.scheduled_time is not None:
+        try:
+            parsed = datetime.fromisoformat(data.scheduled_time)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            reminder.next_execution = parsed.isoformat()
+            if reminder.recurrence == "once":
+                reminder.is_active = 1
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"detail": "Formato de data inválido. Use ISO 8601.", "code": "INVALID_DATE"},
+            )
+
+    reminder.updated_at = now
+    await save_reminder(db, reminder)
+    await db.commit()
+    return ReminderOut.from_orm(reminder)
 
 
 async def sync_reminders(

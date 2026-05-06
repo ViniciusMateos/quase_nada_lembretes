@@ -17,6 +17,8 @@ import { register } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ErrorBanner from '../components/ErrorBanner';
+import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
+import PressableScale from '../components/PressableScale';
 
 function validateName(value) {
   if (!value.trim()) return 'Nome é obrigatório';
@@ -55,6 +57,7 @@ export default function RegisterScreen({ navigation }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({ name: null, email: null, password: null });
   const [apiError, setApiError] = useState(null);
   const [rawError, setRawError] = useState(null);
@@ -85,7 +88,7 @@ export default function RegisterScreen({ navigation }) {
     setIsLoading(true);
     try {
       const data = await register({ name: name.trim(), email: email.trim().toLowerCase(), password });
-      authLogin(data.access_token, data.user);
+      authLogin(data.access_token, data.user, data.refresh_token);
     } catch (error) {
       setApiError(getApiErrorMessage(error));
       setRawError(error);
@@ -96,12 +99,12 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <TouchableOpacity style={styles.themeToggle} onPress={toggleTheme} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+      <PressableScale style={styles.themeToggle} onPress={toggleTheme} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Image
           source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
           style={{ width: 26, height: 26, tintColor: theme.textSecondary }}
         />
-      </TouchableOpacity>
+      </PressableScale>
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -155,26 +158,35 @@ export default function RegisterScreen({ navigation }) {
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Senha</Text>
-            <TextInput
-              style={[styles.input, errors.password && styles.inputError]}
-              placeholder="Mínimo 8 caracteres"
-              placeholderTextColor={theme.textPlaceholder}
-              value={password}
-              onChangeText={text => { setPassword(text); if (errors.password) setErrors(prev => ({ ...prev, password: validatePassword(text) })); }}
-              onBlur={() => handleFieldBlur('password')}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleSubmit}
-              editable={!isLoading}
-            />
+            <View style={[styles.inputWrapper, errors.password && styles.inputError]}>
+              <TextInput
+                style={styles.inputInner}
+                placeholder="Mínimo 8 caracteres"
+                placeholderTextColor={theme.textPlaceholder}
+                value={password}
+                onChangeText={text => { setPassword(text); if (errors.password) setErrors(prev => ({ ...prev, password: validatePassword(text) })); }}
+                onBlur={() => handleFieldBlur('password')}
+                secureTextEntry={!showPassword}
+                returnKeyType="done"
+                onSubmitEditing={handleSubmit}
+                editable={!isLoading}
+              />
+              <PressableScale
+                onPress={() => setShowPassword(p => !p)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.eyeButton}
+                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                <PasswordVisibilityIcon hidden={showPassword} color={theme.textPlaceholder} />
+              </PressableScale>
+            </View>
             {errors.password ? <Text style={styles.fieldError}>{errors.password}</Text> : null}
           </View>
 
-          <TouchableOpacity
+          <PressableScale
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={isLoading}
-            activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel="Criar conta"
             accessibilityState={{ disabled: isLoading }}
@@ -184,13 +196,13 @@ export default function RegisterScreen({ navigation }) {
             ) : (
               <Text style={styles.buttonText}>Criar conta</Text>
             )}
-          </TouchableOpacity>
+          </PressableScale>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Já tenho conta </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <PressableScale onPress={() => navigation.navigate('Login')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.footerLink}>Entrar</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -232,6 +244,24 @@ function makeStyles(theme) {
       fontFamily: 'System',
       minHeight: 50,
     },
+    inputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 12,
+      minHeight: 50,
+    },
+    inputInner: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 16,
+      color: theme.textPrimary,
+      fontFamily: 'System',
+    },
+    eyeButton: { paddingRight: 14 },
     inputError: { borderColor: theme.error },
     fieldError: { color: theme.error, fontSize: 12, marginTop: 6, marginLeft: 4, fontFamily: 'System' },
     button: {

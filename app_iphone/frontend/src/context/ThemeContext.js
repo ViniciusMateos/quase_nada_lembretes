@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
+import { Animated, StyleSheet } from 'react-native';
 import { MMKV } from 'react-native-mmkv';
 
 const themeStorage = new MMKV();
@@ -38,16 +39,28 @@ export const LIGHT_THEME = {
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
+  const fadeAnim = useRef(new Animated.Value(1)).current;
   const [isDark, setIsDark] = useState(() => {
     const saved = themeStorage.getString('theme');
     return saved !== 'light';
   });
 
   const toggleTheme = () => {
-    setIsDark(prev => {
-      const next = !prev;
-      themeStorage.set('theme', next ? 'dark' : 'light');
-      return next;
+    Animated.timing(fadeAnim, {
+      toValue: 0.25,
+      duration: 110,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsDark(prev => {
+        const next = !prev;
+        themeStorage.set('theme', next ? 'dark' : 'light');
+        return next;
+      });
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
     });
   };
 
@@ -55,7 +68,9 @@ export function ThemeProvider({ children }) {
 
   return (
     <ThemeContext.Provider value={{ theme, isDark, toggleTheme }}>
-      {children}
+      <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+        {children}
+      </Animated.View>
     </ThemeContext.Provider>
   );
 }
@@ -65,3 +80,9 @@ export function useTheme() {
   if (!context) throw new Error('useTheme deve ser usado dentro de ThemeProvider');
   return context;
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});

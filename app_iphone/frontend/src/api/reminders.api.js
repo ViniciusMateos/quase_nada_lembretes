@@ -25,6 +25,17 @@ export async function deleteReminder(id) {
 }
 
 /**
+ * Atualiza título e/ou horário de um lembrete.
+ * @param {string} id
+ * @param {{ title?: string, scheduled_time?: string }} data
+ * @returns {Promise<object>}
+ */
+export async function updateReminder(id, data) {
+  const response = await apiClient.patch(`/api/v1/reminders/${id}`, data);
+  return response.data;
+}
+
+/**
  * Sincroniza lembretes com execuções agendadas para notificações locais.
  * @returns {Promise<{
  *   synced_at: string,

@@ -10,9 +10,10 @@ import {
   SafeAreaView,
   Text,
   ActivityIndicator,
-  Modal,
   Animated,
   Image,
+  PanResponder,
+  Dimensions,
 } from 'react-native';
 import { sendMessage } from '../api/messages.api';
 import { deleteReminder, syncReminders } from '../api/reminders.api';
@@ -23,125 +24,12 @@ import MessageBubble from '../components/MessageBubble';
 import TypingIndicator from '../components/TypingIndicator';
 import ReminderAmbiguousModal from '../components/ReminderAmbiguousModal';
 import NotificationPermissionBanner from '../components/NotificationPermissionBanner';
+import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
+import PressableScale from '../components/PressableScale';
+import useFocusEntrance from '../hooks/useFocusEntrance';
+import { playReceiveSound, playSendSound, preloadSounds } from '../services/sounds';
 
-function HamburgerIcon() {
-  return (
-    <View style={{ gap: 4, padding: 4 }}>
-      {[0, 1, 2].map(i => (
-        <View key={i} style={{ width: 18, height: 2, backgroundColor: '#94A3B8' }} />
-      ))}
-    </View>
-  );
-}
-
-function HamburgerMenu({ visible, onClose, navigation }) {
-  const { theme, isDark, toggleTheme } = useTheme();
-  const slideAnim = useRef(new Animated.Value(300)).current;
-
-  useEffect(() => {
-    if (visible) {
-      Animated.timing(slideAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
-    }
-  }, [visible, slideAnim]);
-
-  const close = () => {
-    Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start(() => onClose());
-  };
-
-  const goToAccount = () => {
-    close();
-    setTimeout(() => navigation.navigate('Account'), 220);
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
-      <TouchableOpacity style={menuStyles.overlay} onPress={close} activeOpacity={1}>
-        <Animated.View
-          style={[menuStyles.drawer, { backgroundColor: theme.surface, transform: [{ translateX: slideAnim }] }]}
-        >
-          <TouchableOpacity style={menuStyles.closeRow} onPress={close} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ color: theme.textSecondary, fontSize: 18 }}>✕</Text>
-          </TouchableOpacity>
-
-          <View style={[menuStyles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity style={menuStyles.row} onPress={toggleTheme} activeOpacity={0.7}>
-            <View style={menuStyles.rowLeft}>
-              <Image
-                source={
-                  isDark
-                    ? require('../../assets/icon-tema-claro.png')
-                    : require('../../assets/icon-tema-escuro.png')
-                }
-                style={{ width: 22, height: 22, tintColor: theme.textPrimary, marginRight: 12 }}
-              />
-              <Text style={[menuStyles.rowText, { color: theme.textPrimary }]}>Alterar tema</Text>
-            </View>
-            <View style={[menuStyles.toggle, { backgroundColor: isDark ? theme.primary : theme.border }]}>
-              <View style={[menuStyles.toggleDot, { marginLeft: isDark ? 18 : 2 }]} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={[menuStyles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity style={menuStyles.row} onPress={goToAccount} activeOpacity={0.7}>
-            <View style={menuStyles.rowLeft}>
-              <Text style={{ fontSize: 20, marginRight: 12 }}>👤</Text>
-              <Text style={[menuStyles.rowText, { color: theme.textPrimary }]}>Conta</Text>
-            </View>
-            <Text style={{ color: theme.textSecondary, fontSize: 22 }}>›</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-const menuStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-    flexDirection: 'row',
-  },
-  drawer: {
-    width: 280,
-    height: '100%',
-    paddingTop: 56,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: -2, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-  },
-  closeRow: {
-    alignItems: 'flex-end',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  divider: { height: 1, marginHorizontal: 0 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-  },
-  rowLeft: { flexDirection: 'row', alignItems: 'center' },
-  rowText: { fontSize: 16, fontFamily: 'System' },
-  toggle: {
-    width: 40,
-    height: 22,
-    borderRadius: 11,
-    justifyContent: 'center',
-  },
-  toggleDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#FFFFFF',
-  },
-});
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 function getGreeting(name) {
   const hour = new Date().getHours();
@@ -161,25 +49,63 @@ export default function ChatScreen({ navigation }) {
   const { user } = useAuth();
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const entranceStyle = useFocusEntrance();
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
+  const swipeTranslateX = useRef(new Animated.Value(0)).current;
+  const sendFlyAnim = useRef(new Animated.Value(0)).current;
+  const sendButtonAnim = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
 
-  const [messages, setMessages] = useState([
-    {
-      id: 'greeting',
-      role: 'assistant',
-      content: getGreeting(user?.name || 'você'),
-      timestamp: new Date().toISOString(),
-      action: null,
-    },
-  ]);
+  const swipePan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > Math.abs(g.dy) * 2 && Math.abs(g.dx) > 20,
+      onPanResponderMove: (_, g) => {
+        if (g.dx < 0) {
+          swipeTranslateX.setValue(Math.max(g.dx, -screenWidth));
+        }
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx < -80) {
+          Animated.timing(swipeTranslateX, {
+            toValue: -screenWidth,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            swipeTranslateX.setValue(0);
+            navigation.navigate('Lembretes');
+          });
+          return;
+        }
+
+        Animated.spring(swipeTranslateX, {
+          toValue: 0,
+          useNativeDriver: true,
+          bounciness: 0,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(swipeTranslateX, {
+          toValue: 0,
+          useNativeDriver: true,
+          bounciness: 0,
+        }).start();
+      },
+    }),
+  ).current;
+
+  const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
+  const [showInitialTyping, setShowInitialTyping] = useState(true);
+  const [flyingMessage, setFlyingMessage] = useState('');
   const [showAmbiguousModal, setShowAmbiguousModal] = useState(false);
   const [ambiguousCandidates, setAmbiguousCandidates] = useState([]);
   const [hasNotifPermission, setHasNotifPermission] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
+  const canSend = inputText.trim().length > 0 && !isLoading;
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -205,8 +131,28 @@ export default function ChatScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
+    setShowInitialTyping(true);
+    const timer = setTimeout(() => {
+      setMessages([
+        {
+          id: `greeting_${Date.now()}`,
+          role: 'assistant',
+          content: getGreeting(user?.name || 'você'),
+          timestamp: new Date().toISOString(),
+          action: null,
+        },
+      ]);
+      setShowInitialTyping(false);
+      scrollToBottom();
+    }, 650);
+
+    return () => clearTimeout(timer);
+  }, [scrollToBottom, user?.name]);
+
+  useEffect(() => {
     let isMounted = true;
     const init = async () => {
+      preloadSounds();
       const hasPermission = await requestPermission();
       if (isMounted) setHasNotifPermission(hasPermission);
       if (hasPermission) await handleSync();
@@ -215,13 +161,20 @@ export default function ChatScreen({ navigation }) {
     return () => { isMounted = false; };
   }, [handleSync]);
 
+  useEffect(() => {
+    Animated.timing(sendButtonAnim, {
+      toValue: canSend ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [canSend, sendButtonAnim]);
+
   const handleSend = async () => {
     const content = inputText.trim();
     if (!content || isLoading) return;
 
     setInputText('');
     inputRef.current?.clear();
-    setIsLoading(true);
 
     const userMessage = {
       id: generateId(),
@@ -230,7 +183,21 @@ export default function ChatScreen({ navigation }) {
       timestamp: new Date().toISOString(),
       action: null,
     };
+
+    playSendSound();
+    setFlyingMessage(content);
+    sendFlyAnim.setValue(0);
+    await new Promise(resolve => {
+      Animated.timing(sendFlyAnim, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }).start(resolve);
+    });
+    setFlyingMessage('');
+
     addMessage(userMessage);
+    setIsLoading(true);
     setShowTyping(true);
     scrollToBottom();
 
@@ -250,6 +217,7 @@ export default function ChatScreen({ navigation }) {
         action: result.action || null,
       };
       addMessage(aiMessage);
+      playReceiveSound();
 
       const actionType = result.action?.type;
       if (actionType === 'reminder_created' || actionType === 'reminder_deleted') {
@@ -341,20 +309,32 @@ export default function ChatScreen({ navigation }) {
 
   const renderItem = useCallback(({ item }) => <MessageBubble message={item} />, []);
   const keyExtractor = useCallback(item => item.id, []);
-  const canSend = inputText.trim().length > 0 && !isLoading;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
+    <Animated.View
+      style={[
+        styles.swipePage,
+        entranceStyle,
+        { transform: [...entranceStyle.transform, { translateX: swipeTranslateX }] },
+      ]}
+      {...swipePan.panHandlers}
+    >
+    <SafeAreaView style={{ flex: 1 }}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Lembretes</Text>
-        <TouchableOpacity
+        <Image
+          source={require('../../assets/logo.png')}
+          style={[styles.headerLogo, { tintColor: theme.isDark ? '#FFFFFF' : '#1A1A2E' }]}
+          resizeMode="contain"
+        />
+        <PressableScale
           onPress={() => setMenuVisible(true)}
           hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}
           accessibilityLabel="Menu"
           accessibilityRole="button"
         >
           <HamburgerIcon />
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       {!hasNotifPermission && <NotificationPermissionBanner />}
@@ -369,12 +349,7 @@ export default function ChatScreen({ navigation }) {
           contentContainerStyle={styles.messageListContent}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={scrollToBottom}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Envie uma mensagem para começar</Text>
-            </View>
-          }
-          ListFooterComponent={showTyping ? <TypingIndicator /> : null}
+          ListFooterComponent={showInitialTyping || showTyping ? <TypingIndicator /> : null}
         />
 
         <View style={styles.inputContainer}>
@@ -393,8 +368,16 @@ export default function ChatScreen({ navigation }) {
             editable={!isLoading}
             accessibilityLabel="Campo de mensagem"
           />
-          <TouchableOpacity
-            style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+          <AnimatedTouchableOpacity
+            style={[
+              styles.sendButton,
+              {
+                opacity: sendButtonAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.45, 1],
+                }),
+              },
+            ]}
             onPress={handleSend}
             disabled={!canSend}
             activeOpacity={0.75}
@@ -407,7 +390,45 @@ export default function ChatScreen({ navigation }) {
             ) : (
               <Text style={styles.sendButtonText}>↑</Text>
             )}
-          </TouchableOpacity>
+          </AnimatedTouchableOpacity>
+          {flyingMessage ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.flyingBubble,
+                {
+                  opacity: sendFlyAnim.interpolate({
+                    inputRange: [0, 0.12, 0.86, 1],
+                    outputRange: [0, 1, 1, 0],
+                  }),
+                  transform: [
+                    {
+                      translateX: sendFlyAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 0],
+                      }),
+                    },
+                    {
+                      translateY: sendFlyAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -92],
+                      }),
+                    },
+                    {
+                      scale: sendFlyAnim.interpolate({
+                        inputRange: [0, 0.35, 1],
+                        outputRange: [0.32, 0.86, 1],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.flyingBubbleText} numberOfLines={2}>
+                {flyingMessage}
+              </Text>
+            </Animated.View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
 
@@ -424,12 +445,15 @@ export default function ChatScreen({ navigation }) {
         navigation={navigation}
       />
     </SafeAreaView>
+    </Animated.View>
+    </View>
   );
 }
 
 function makeStyles(theme) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: theme.background },
+    safe: { flex: 1, backgroundColor: theme.background, overflow: 'hidden' },
+    swipePage: { flex: 1, backgroundColor: theme.background },
     flex: { flex: 1 },
     messageList: { flex: 1 },
     messageListContent: { paddingTop: 16, paddingBottom: 8 },
@@ -439,16 +463,15 @@ function makeStyles(theme) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
+      paddingLeft: 20,
+      paddingRight: 16,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.border,
     },
-    headerTitle: {
-      fontSize: 17,
-      fontWeight: '600',
-      color: theme.textPrimary,
-      fontFamily: 'System',
+    headerLogo: {
+      width: 30,
+      height: 30,
     },
     inputContainer: {
       flexDirection: 'row',
@@ -459,6 +482,7 @@ function makeStyles(theme) {
       borderTopColor: theme.border,
       backgroundColor: theme.background,
       gap: 8,
+      position: 'relative',
     },
     textInput: {
       flex: 1,
@@ -484,13 +508,38 @@ function makeStyles(theme) {
       justifyContent: 'center',
       flexShrink: 0,
     },
-    sendButtonDisabled: { opacity: 0.4 },
     sendButtonText: {
       color: '#FFFFFF',
       fontSize: 20,
       fontWeight: '700',
       lineHeight: 24,
       fontFamily: 'System',
+    },
+    flyingBubble: {
+      position: 'absolute',
+      right: 12,
+      bottom: 10,
+      maxWidth: 220,
+      minHeight: 44,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 18,
+      borderBottomRightRadius: 4,
+      backgroundColor: theme.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: theme.isDark ? 0.35 : 0.18,
+      shadowRadius: 14,
+      elevation: 8,
+    },
+    flyingBubbleText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      lineHeight: 20,
+      fontFamily: 'System',
+      fontWeight: '500',
     },
   });
 }

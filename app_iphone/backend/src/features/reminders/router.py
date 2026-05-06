@@ -6,9 +6,11 @@ from src.core.dependencies import get_current_user
 from src.features.reminders.schemas import (
     ReminderDeleteResponse,
     ReminderListResponse,
+    ReminderOut,
+    ReminderUpdate,
     SyncResponse,
 )
-from src.features.reminders.service import list_reminders, remove_reminder, sync_reminders
+from src.features.reminders.service import list_reminders, remove_reminder, sync_reminders, update_reminder
 from src.models.models import User
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
@@ -33,6 +35,16 @@ async def sync(
     db: AsyncSession = Depends(get_db),
 ) -> SyncResponse:
     return await sync_reminders(db, current_user.id, horizon_days, max_per_reminder)
+
+
+@router.patch("/{reminder_id}", response_model=ReminderOut, status_code=status.HTTP_200_OK)
+async def update_reminder_endpoint(
+    reminder_id: str,
+    payload: ReminderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReminderOut:
+    return await update_reminder(db, reminder_id, current_user.id, payload)
 
 
 @router.delete("/{reminder_id}", response_model=ReminderDeleteResponse, status_code=status.HTTP_200_OK)

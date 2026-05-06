@@ -1,5 +1,7 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
+import ActionSheet from './ActionSheet';
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return '';
@@ -25,7 +27,96 @@ function formatLocalDatetime(isoString) {
   }
 }
 
+async function copyText(text) {
+  if (!text) return false;
+
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+
+  return false;
+}
+
+function AnimatedBubble({ children, message, styles, bubbleStyle }) {
+  const entrance = useRef(new Animated.Value(0)).current;
+  const press = useRef(new Animated.Value(1)).current;
+  const [isHolding, setIsHolding] = useState(false);
+  const [copySheetVisible, setCopySheetVisible] = useState(false);
+
+  useEffect(() => {
+    Animated.spring(entrance, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 70,
+      friction: 9,
+    }).start();
+  }, [entrance]);
+
+  const handleCopy = async () => {
+    setCopySheetVisible(false);
+    const copied = await copyText(message.content);
+    if (!copied && Platform.OS !== 'web') {
+      Alert.alert('Texto da mensagem', message.content);
+    }
+  };
+
+  const animatePress = toValue => {
+    Animated.spring(press, {
+      toValue,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 7,
+    }).start();
+  };
+
+  return (
+    <>
+    <Animated.View
+      style={{
+        opacity: entrance,
+        transform: [
+          {
+            translateY: entrance.interpolate({
+              inputRange: [0, 1],
+              outputRange: [10, 0],
+            }),
+          },
+          { scale: press },
+        ],
+      }}
+    >
+      <Pressable
+        onPressIn={() => animatePress(0.98)}
+        onPressOut={() => {
+          setIsHolding(false);
+          animatePress(1);
+        }}
+        onLongPress={() => {
+          setIsHolding(true);
+          animatePress(1.02);
+          setCopySheetVisible(true);
+        }}
+        delayLongPress={350}
+        style={[bubbleStyle, isHolding && styles.bubbleHolding]}
+      >
+        {children}
+      </Pressable>
+    </Animated.View>
+    <ActionSheet
+      visible={copySheetVisible}
+      title="Mensagem"
+      message="Escolha uma acao para esta mensagem"
+      options={[{ label: 'Copiar texto', onPress: handleCopy }]}
+      onCancel={() => setCopySheetVisible(false)}
+    />
+    </>
+  );
+}
+
 export default function MessageBubble({ message }) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const isUser = message.role === 'user';
   const isReminderCreated = message.action?.type === 'reminder_created';
   const isError = message.isError === true;
@@ -40,9 +131,9 @@ export default function MessageBubble({ message }) {
 
     return (
       <View style={[styles.wrapper, styles.wrapperAssistant]}>
-        <View style={styles.bubbleReminder}>
+        <AnimatedBubble message={{ ...message, content: displayText }} styles={styles} bubbleStyle={styles.bubbleReminder}>
           <Text style={styles.contentReminder}>{displayText}</Text>
-        </View>
+        </AnimatedBubble>
         <Text style={[styles.timestamp, styles.timestampAssistant]}>
           {formatTimestamp(message.timestamp)}
         </Text>
@@ -53,9 +144,9 @@ export default function MessageBubble({ message }) {
   if (isError) {
     return (
       <View style={[styles.wrapper, styles.wrapperAssistant]}>
-        <View style={styles.bubbleError}>
+        <AnimatedBubble message={message} styles={styles} bubbleStyle={styles.bubbleError}>
           <Text style={styles.contentError}>{message.content}</Text>
-        </View>
+        </AnimatedBubble>
         <Text style={[styles.timestamp, styles.timestampAssistant]}>
           {formatTimestamp(message.timestamp)}
         </Text>
@@ -65,11 +156,15 @@ export default function MessageBubble({ message }) {
 
   return (
     <View style={[styles.wrapper, isUser ? styles.wrapperUser : styles.wrapperAssistant]}>
-      <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
+      <AnimatedBubble
+        message={message}
+        styles={styles}
+        bubbleStyle={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}
+      >
         <Text style={[styles.content, isUser ? styles.contentUser : styles.contentAssistant]}>
           {message.content}
         </Text>
-      </View>
+      </AnimatedBubble>
       <Text style={[styles.timestamp, isUser ? styles.timestampUser : styles.timestampAssistant]}>
         {formatTimestamp(message.timestamp)}
       </Text>
@@ -77,85 +172,96 @@ export default function MessageBubble({ message }) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    marginVertical: 4,
-    marginHorizontal: 16,
-    maxWidth: '80%',
-  },
-  wrapperUser: {
-    alignSelf: 'flex-end',
-    alignItems: 'flex-end',
-  },
-  wrapperAssistant: {
-    alignSelf: 'flex-start',
-    alignItems: 'flex-start',
-  },
-  bubble: {
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  bubbleUser: {
-    backgroundColor: '#FF8234',
-    borderBottomRightRadius: 4,
-  },
-  bubbleAssistant: {
-    backgroundColor: '#1A1A2E',
-    borderBottomLeftRadius: 4,
-  },
-  bubbleReminder: {
-    borderRadius: 14,
-    borderBottomLeftRadius: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255, 130, 52, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 130, 52, 0.35)',
-  },
-  content: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontFamily: 'System',
-  },
-  contentUser: {
-    color: '#FFFFFF',
-  },
-  contentAssistant: {
-    color: '#F1F5F9',
-  },
-  contentReminder: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontFamily: 'System',
-    color: '#FF8234',
-    fontWeight: '600',
-  },
-  bubbleError: {
-    borderRadius: 14,
-    borderBottomLeftRadius: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
-  },
-  contentError: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontFamily: 'System',
-    color: '#EF4444',
-    fontWeight: '600',
-  },
-  timestamp: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 3,
-  },
-  timestampUser: {
-    marginRight: 4,
-  },
-  timestampAssistant: {
-    marginLeft: 4,
-  },
-});
+function makeStyles(theme) {
+  return StyleSheet.create({
+    wrapper: {
+      marginVertical: 4,
+      marginHorizontal: 16,
+      maxWidth: '80%',
+    },
+    wrapperUser: {
+      alignSelf: 'flex-end',
+      alignItems: 'flex-end',
+    },
+    wrapperAssistant: {
+      alignSelf: 'flex-start',
+      alignItems: 'flex-start',
+    },
+    bubble: {
+      borderRadius: 18,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    bubbleHolding: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: theme.isDark ? 0.35 : 0.14,
+      shadowRadius: 12,
+      elevation: 5,
+    },
+    bubbleUser: {
+      backgroundColor: theme.primary,
+      borderBottomRightRadius: 4,
+    },
+    bubbleAssistant: {
+      backgroundColor: theme.surface,
+      borderBottomLeftRadius: 4,
+      borderWidth: theme.isDark ? 0 : 1,
+      borderColor: theme.border,
+    },
+    bubbleReminder: {
+      borderRadius: 14,
+      borderBottomLeftRadius: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: theme.isDark ? 'rgba(255, 130, 52, 0.12)' : '#FFF3EA',
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(255, 130, 52, 0.35)' : '#FFD4B8',
+    },
+    content: {
+      fontSize: 15,
+      lineHeight: 22,
+      fontFamily: 'System',
+    },
+    contentUser: {
+      color: '#FFFFFF',
+    },
+    contentAssistant: {
+      color: theme.textPrimary,
+    },
+    contentReminder: {
+      fontSize: 15,
+      lineHeight: 22,
+      fontFamily: 'System',
+      color: theme.primary,
+      fontWeight: '600',
+    },
+    bubbleError: {
+      borderRadius: 14,
+      borderBottomLeftRadius: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: theme.isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEECEC',
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(239, 68, 68, 0.35)' : '#F8B4B4',
+    },
+    contentError: {
+      fontSize: 15,
+      lineHeight: 22,
+      fontFamily: 'System',
+      color: theme.error,
+      fontWeight: '600',
+    },
+    timestamp: {
+      fontSize: 11,
+      color: theme.textSecondary,
+      marginTop: 3,
+    },
+    timestampUser: {
+      marginRight: 4,
+    },
+    timestampAssistant: {
+      marginLeft: 4,
+    },
+  });
+}

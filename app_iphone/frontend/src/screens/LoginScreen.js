@@ -17,6 +17,8 @@ import { login as apiLogin } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ErrorBanner from '../components/ErrorBanner';
+import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
+import PressableScale from '../components/PressableScale';
 
 function getApiErrorMessage(error) {
   const status = error?.response?.status;
@@ -34,6 +36,7 @@ export default function LoginScreen({ navigation }) {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [rawError, setRawError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +59,7 @@ export default function LoginScreen({ navigation }) {
     setIsLoading(true);
     try {
       const data = await apiLogin({ email: email.trim().toLowerCase(), password });
-      authLogin(data.access_token, data.user);
+      authLogin(data.access_token, data.user, data.refresh_token);
     } catch (error) {
       setApiError(getApiErrorMessage(error));
       setRawError(error);
@@ -68,12 +71,12 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <TouchableOpacity style={styles.themeToggle} onPress={toggleTheme} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+      <PressableScale style={styles.themeToggle} onPress={toggleTheme} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Image
           source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
           style={{ width: 26, height: 26, tintColor: theme.textSecondary }}
         />
-      </TouchableOpacity>
+      </PressableScale>
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -109,25 +112,34 @@ export default function LoginScreen({ navigation }) {
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Senha</Text>
-            <TextInput
-              style={[styles.input, passwordError && styles.inputError]}
-              placeholder="Sua senha"
-              placeholderTextColor={theme.textPlaceholder}
-              value={password}
-              onChangeText={text => { setPassword(text); if (passwordError && text) setPasswordError(null); }}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleSubmit}
-              editable={!isLoading}
-            />
+            <View style={[styles.inputWrapper, passwordError && styles.inputError]}>
+              <TextInput
+                style={styles.inputInner}
+                placeholder="Sua senha"
+                placeholderTextColor={theme.textPlaceholder}
+                value={password}
+                onChangeText={text => { setPassword(text); if (passwordError && text) setPasswordError(null); }}
+                secureTextEntry={!showPassword}
+                returnKeyType="done"
+                onSubmitEditing={handleSubmit}
+                editable={!isLoading}
+              />
+              <PressableScale
+                onPress={() => setShowPassword(p => !p)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.eyeButton}
+                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                <PasswordVisibilityIcon hidden={showPassword} color={theme.textPlaceholder} />
+              </PressableScale>
+            </View>
             {passwordError ? <Text style={styles.fieldError}>{passwordError}</Text> : null}
           </View>
 
-          <TouchableOpacity
+          <PressableScale
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={isLoading}
-            activeOpacity={0.8}
             accessibilityRole="button"
             accessibilityLabel="Entrar"
             accessibilityState={{ disabled: isLoading }}
@@ -137,13 +149,13 @@ export default function LoginScreen({ navigation }) {
             ) : (
               <Text style={styles.buttonText}>Entrar</Text>
             )}
-          </TouchableOpacity>
+          </PressableScale>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Não tenho conta </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <PressableScale onPress={() => navigation.navigate('Register')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.footerLink}>Criar conta</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -185,6 +197,24 @@ function makeStyles(theme) {
       fontFamily: 'System',
       minHeight: 50,
     },
+    inputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 12,
+      minHeight: 50,
+    },
+    inputInner: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 16,
+      color: theme.textPrimary,
+      fontFamily: 'System',
+    },
+    eyeButton: { paddingRight: 14 },
     inputError: { borderColor: theme.error },
     fieldError: { color: theme.error, fontSize: 12, marginTop: 6, marginLeft: 4, fontFamily: 'System' },
     button: {

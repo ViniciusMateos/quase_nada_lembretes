@@ -32,6 +32,11 @@ class ReminderListResponse(BaseModel):
     offset: int
 
 
+class ReminderUpdate(BaseModel):
+    title: str | None = None
+    scheduled_time: str | None = None
+
+
 class ReminderDeleteResponse(BaseModel):
     id: str
     title: str

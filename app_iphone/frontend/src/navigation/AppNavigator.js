@@ -1,4 +1,4 @@
-import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import { View, StyleSheet, Image } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +9,8 @@ import ChatScreen from '../screens/ChatScreen';
 import RemindersScreen from '../screens/RemindersScreen';
 import AccountScreen from '../screens/AccountScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import LoadingDog from '../components/LoadingDog';
+import PressableScale from '../components/PressableScale';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -16,7 +18,7 @@ const Tab = createBottomTabNavigator();
 function SplashScreen() {
   return (
     <View style={styles.splash}>
-      <ActivityIndicator size="large" color="#FF8234" />
+      <LoadingDog size={56} color="#FF8234" />
     </View>
   );
 }
@@ -52,6 +54,14 @@ function AppTabs() {
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarLabelStyle: { fontSize: 12, fontFamily: 'System', fontWeight: '500' },
+        tabBarButton: props => (
+          <PressableScale
+            {...props}
+            applyStyleToRoot
+            contentStyle={styles.tabButtonContent}
+            pressScale={0.92}
+          />
+        ),
       }}
     >
       <Tab.Screen
@@ -62,7 +72,7 @@ function AppTabs() {
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/icon-chat.png')}
-              style={{ width: 24, height: 24, tintColor: color }}
+              style={{ width: 22, height: 22, tintColor: color }}
             />
           ),
         }}
@@ -75,7 +85,7 @@ function AppTabs() {
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/icon-lembretes.png')}
-              style={{ width: 24, height: 24, tintColor: color }}
+              style={{ width: 22, height: 22, tintColor: color }}
             />
           ),
         }}
@@ -108,6 +118,11 @@ const styles = StyleSheet.create({
   splash: {
     flex: 1,
     backgroundColor: '#0A0A0F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabButtonContent: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
