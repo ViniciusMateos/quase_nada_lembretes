@@ -14,45 +14,53 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
-## [0.6.0] - 2026-05-06
+## [0.5.0] - 2026-05-06
 
 ### Added
-- Web Preview local do app iOS via Expo SDK 51 e React Native Web.
-- Script `npm run web` no frontend para iniciar a preview no browser.
-- `metro.config.js` com aliases web para `react-native-mmkv` e `@notifee/react-native` somente em `platform === 'web'`.
-- Stub web de MMKV usando `localStorage` para persistir tokens durante a preview.
-- Stub web de Notifee para evitar quebra do bundle no browser.
-- `notifications.web.js` com toast visual simulando notificacoes locais no browser.
+- Endpoint `PATCH /api/v1/reminders/{id}` para editar título e data/hora de lembretes existentes
+- `EditReminderModal` em RemindersScreen com hint "clique para editar"
+- Componente `LoadingDog` (apenas-cachorro.png + anel animado) substituindo `ActivityIndicator` nos loadings de tela
+- `EyeIcon` com risco diagonal em Login e Register (visível = sem risco, oculto = com risco)
+- Tab Bar footer garantido em toda a navegação; swipe `PanResponder` em Chat (←Lembretes) e Reminders (→Chat)
+- Novos componentes: `ActionSheet`, `ConfirmDialog`, `HamburgerMenu`, `PressableScale`, `ChevronIcon`
+- Sons de envio e recebimento de mensagens no Chat (`sounds.js`)
+- `hooks/useFocusEntrance.js` para animações de entrada
+- Refresh tokens com rotação automática — access token expira em 60 min, refresh token em 90 dias (hash SHA-256 no banco)
+- Interceptor axios que renova o access token silenciosamente e enfileira requests concorrentes durante o refresh
+- Web preview local do app iOS via `expo start --web` (`npm run web`)
+- `webpack.config.js` com aliases para stubs de libs nativas (@notifee, react-native-mmkv) no bundle web
+- `src/stubs/notifee.web.js` — stub no-op para @notifee/react-native
+- `src/stubs/mmkv.web.js` — MMKV via localStorage para persistência de tokens na web
+- `src/services/notifications.web.js` — toast DOM visual simulando notificações locais no browser
 
 ### Changed
-- Frontend passa a incluir `@expo/metro-runtime`, `react-dom` e `react-native-web` compativeis com Expo SDK 51.
-- `axios` atualizado para `1.16.0`.
-- Opcoes iOS-only de `Alert.alert` agora ficam condicionadas a `Platform.OS === 'ios'`.
-- API do frontend centralizada em `API_BASE_URL`, usada por iOS/Android, builds EAS e preview web local.
+- Frontend inclui `react-native-web`, `react-dom` e `@expo/webpack-config` (compatíveis com Expo SDK 51)
+- `Alert.alert` com opção `userInterfaceStyle` agora condicionado a `Platform.OS === 'ios'`
+- RemindersScreen migrado para `useTheme()`
 
-### Security
-- Toast de notificacao web usa `textContent` em vez de `innerHTML`, evitando interpolacao HTML com titulos vindos do backend.
-
-### Validation
-- `npx expo export --platform web --output-dir dist-web-qa` validado com sucesso.
-- `npm audit --omit=dev --audit-level=high` ainda aponta vulnerabilidades transientes em dependencias Expo/React Native.
+### Fixed
+- Bug de 401 que não redirecionava para Login por conflito entre estado React e navegação
+- Bolha de erro vermelha, fuso local e recuperação de rede no Chat
+- Grace period no sync e normalização de timestamps BRT para UTC
+- `next_execution` avança em loop no scheduler para não travar em lembretes recorrentes
+- Race condition e fuso horário na confirmação de lembrete criado
 
 ---
 
 ## [0.4.0] - 2026-04-27
 
 ### Added
-- NavegaÃ§Ã£o por swipe entre as abas Chat e Lembretes
+- Navegação por swipe entre as abas Chat e Lembretes
 - Toggle de tema (sol/lua) no menu hamburguer
-- Ãcone de conta e botÃ£o de visualizar senha nas telas de autenticaÃ§Ã£o
+- Ícone de conta e botão de visualizar senha nas telas de autenticação
 
 ### Changed
 - Menu hamburguer compartilhado entre Chat e Lembretes
 - Frontend preparado para uso de `@react-navigation/material-top-tabs` e `react-native-pager-view`
 
 ### Fixed
-- Scheduler backend com timezone UTC explÃ­cito (`AsyncIOScheduler(timezone=pytz.utc)`)
-- DependÃªncia `pytz` adicionada ao backend para suporte consistente de timezone
+- Scheduler backend com timezone UTC explícito (`AsyncIOScheduler(timezone=pytz.utc)`)
+- Dependência `pytz` adicionada ao backend para suporte consistente de timezone
 - Ajustes de tema em componentes de mensagens e tela de lembretes
 
 ---
@@ -78,6 +86,7 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 - BUG-05: correcao de fuso horario usando `client_timestamp`
 
 ---
+
 ## [0.2.0] - 2026-04-23
 
 ### Added
@@ -143,4 +152,3 @@ Versão original do projeto — bot no Telegram para gerenciamento de lembretes 
 - Correções de fuso horário (America/São_Paulo)
 - Normalização de títulos para busca e deduplicação
 - Rotação automática de modelos Gemini em caso de quota esgotada
-
