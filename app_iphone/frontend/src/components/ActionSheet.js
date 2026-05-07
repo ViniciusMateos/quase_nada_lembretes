@@ -1,52 +1,69 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import PressableScale from './PressableScale';
 
-export default function ActionSheet({ visible, title, message, options = [], onCancel }) {
+const MENU_WIDTH = 185;
+const ITEM_HEIGHT = 50;
+const MARGIN = 14;
+
+export default function ActionSheet({ visible, options = [], onCancel, anchorPosition }) {
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const slide = useRef(new Animated.Value(28)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.82)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fade, {
         toValue: visible ? 1 : 0,
-        duration: visible ? 180 : 120,
+        duration: visible ? 140 : 90,
         useNativeDriver: true,
       }),
-      Animated.timing(slide, {
-        toValue: visible ? 0 : 28,
-        duration: visible ? 220 : 120,
+      Animated.spring(scale, {
+        toValue: visible ? 1 : 0.82,
         useNativeDriver: true,
+        tension: 220,
+        friction: 18,
       }),
     ]).start();
-  }, [fade, slide, visible]);
+  }, [fade, scale, visible]);
+
+  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+  const menuHeight = options.length * ITEM_HEIGHT;
+
+  let top = screenHeight / 2 - menuHeight / 2;
+  let left = screenWidth / 2 - MENU_WIDTH / 2;
+
+  if (anchorPosition) {
+    const { pageX, pageY } = anchorPosition;
+    top = pageY + menuHeight + MARGIN * 2 > screenHeight
+      ? Math.max(MARGIN, pageY - menuHeight - MARGIN)
+      : pageY + MARGIN;
+    left = pageX + MENU_WIDTH > screenWidth - MARGIN
+      ? screenWidth - MENU_WIDTH - MARGIN
+      : Math.max(MARGIN, pageX);
+  }
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
       <Animated.View style={[styles.overlay, { opacity: fade }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: slide }] }]}>
-          {title ? <Text style={styles.title}>{title}</Text> : null}
-          {message ? <Text style={styles.message}>{message}</Text> : null}
-          <View style={styles.actions}>
-            {options.map(option => (
-              <PressableScale
-                key={option.label}
-                style={styles.option}
-                onPress={option.onPress}
-              >
-                <Text style={[styles.optionText, option.destructive && styles.destructiveText]}>
-                  {option.label}
-                </Text>
-              </PressableScale>
-            ))}
-          </View>
-          <PressableScale style={styles.cancelButton} onPress={onCancel}>
-            <Text style={styles.cancelText}>Cancelar</Text>
-          </PressableScale>
+        <Animated.View
+          pointerEvents="box-none"
+          style={[styles.menu, { top, left, transform: [{ scale }] }]}
+        >
+          {options.map((option, index) => (
+            <PressableScale
+              key={option.label}
+              style={[styles.option, index < options.length - 1 && styles.optionBorder]}
+              onPress={option.onPress}
+            >
+              <Text style={[styles.optionText, option.destructive && styles.destructiveText]}>
+                {option.label}
+              </Text>
+            </PressableScale>
+          ))}
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -56,75 +73,46 @@ export default function ActionSheet({ visible, title, message, options = [], onC
 function makeStyles(theme) {
   return StyleSheet.create({
     overlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'flex-end',
-      paddingHorizontal: 10,
-      paddingBottom: 10,
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.18)',
     },
-    sheet: {
-      gap: 8,
-    },
-    title: {
-      textAlign: 'center',
-      color: theme.textSecondary,
-      fontSize: 13,
-      fontWeight: '600',
-      fontFamily: 'System',
+    menu: {
+      position: 'absolute',
+      width: MENU_WIDTH,
       backgroundColor: theme.surface,
-      borderTopLeftRadius: 14,
-      borderTopRightRadius: 14,
-      paddingTop: 14,
-      paddingHorizontal: 18,
-    },
-    message: {
-      textAlign: 'center',
-      color: theme.textPlaceholder,
-      fontSize: 12,
-      fontFamily: 'System',
-      backgroundColor: theme.surface,
-      paddingTop: 4,
-      paddingBottom: 12,
-      paddingHorizontal: 18,
-    },
-    actions: {
-      overflow: 'hidden',
       borderRadius: 14,
-      backgroundColor: theme.surface,
       borderWidth: theme.isDark ? 1 : 0,
       borderColor: theme.border,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: theme.isDark ? 0.45 : 0.2,
+      shadowRadius: 18,
+      elevation: 12,
     },
     option: {
-      minHeight: 54,
+      height: ITEM_HEIGHT,
       alignItems: 'center',
       justifyContent: 'center',
-      borderBottomWidth: 1,
+      paddingHorizontal: 16,
+    },
+    optionBorder: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.border,
     },
     optionText: {
       color: theme.primary,
-      fontSize: 18,
+      fontSize: 16,
       fontFamily: 'System',
       fontWeight: '500',
     },
     destructiveText: {
       color: theme.error,
       fontWeight: '600',
-    },
-    cancelButton: {
-      minHeight: 54,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.surface,
-      borderWidth: theme.isDark ? 1 : 0,
-      borderColor: theme.border,
-    },
-    cancelText: {
-      color: theme.primary,
-      fontSize: 18,
-      fontFamily: 'System',
-      fontWeight: '700',
     },
   });
 }

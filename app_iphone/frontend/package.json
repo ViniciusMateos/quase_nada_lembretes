@@ -13,6 +13,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
     "@notifee/react-native": "^9.0.0",
+    "@react-native-community/datetimepicker": "8.0.1",
     "@react-navigation/bottom-tabs": "^6.5.0",
     "@react-navigation/native": "^6.1.0",
     "@react-navigation/native-stack": "^6.9.0",

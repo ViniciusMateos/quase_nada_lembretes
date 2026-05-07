@@ -2,11 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import ActionSheet from './ActionSheet';
+import { detectIs12h } from '../utils/timeFormat';
+
+const IS_12H = detectIs12h();
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return '';
   try {
-    return new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: IS_12H });
   } catch {
     return '';
   }
@@ -21,6 +24,7 @@ function formatLocalDatetime(isoString) {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      hour12: IS_12H,
     });
   } catch {
     return '';
@@ -43,6 +47,7 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
   const press = useRef(new Animated.Value(1)).current;
   const [isHolding, setIsHolding] = useState(false);
   const [copySheetVisible, setCopySheetVisible] = useState(false);
+  const [anchorPos, setAnchorPos] = useState(null);
 
   useEffect(() => {
     Animated.spring(entrance, {
@@ -92,9 +97,10 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
           setIsHolding(false);
           animatePress(1);
         }}
-        onLongPress={() => {
+        onLongPress={event => {
           setIsHolding(true);
           animatePress(1.02);
+          setAnchorPos({ pageX: event.nativeEvent.pageX, pageY: event.nativeEvent.pageY });
           setCopySheetVisible(true);
         }}
         delayLongPress={350}
@@ -105,8 +111,7 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
     </Animated.View>
     <ActionSheet
       visible={copySheetVisible}
-      title="Mensagem"
-      message="Escolha uma acao para esta mensagem"
+      anchorPosition={anchorPos}
       options={[{ label: 'Copiar texto', onPress: handleCopy }]}
       onCancel={() => setCopySheetVisible(false)}
     />
@@ -127,7 +132,7 @@ export default function MessageBubble({ message }) {
     const title = reminder?.title?.toUpperCase() || '';
     const timeLabel = isRecurring ? 'a partir de' : 'data';
     const timeStr = formatLocalDatetime(reminder?.next_execution);
-    const displayText = `Lembrete criado!\n${title}\n${timeLabel}: ${timeStr}`;
+    const displayText = `${isRecurring ? 'Lembrete recorrente criado!' : 'Lembrete criado!'}\n${title}\n${timeLabel}: ${timeStr}`;
 
     return (
       <View style={[styles.wrapper, styles.wrapperAssistant]}>

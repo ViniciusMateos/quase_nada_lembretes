@@ -49,8 +49,9 @@ export function ThemeProvider({ children }) {
     Animated.timing(fadeAnim, {
       toValue: 0.25,
       duration: 110,
-      useNativeDriver: true,
-    }).start(() => {
+      useNativeDriver: false,
+    }).start();
+    setTimeout(() => {
       setIsDark(prev => {
         const next = !prev;
         themeStorage.set('theme', next ? 'dark' : 'light');
@@ -59,9 +60,9 @@ export function ThemeProvider({ children }) {
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start();
-    });
+    }, 120);
   };
 
   const theme = useMemo(() => (isDark ? DARK_THEME : LIGHT_THEME), [isDark]);

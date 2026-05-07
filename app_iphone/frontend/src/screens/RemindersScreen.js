@@ -14,9 +14,14 @@ import {
   Platform,
   PanResponder,
   Animated,
+  Easing,
   Dimensions,
   Pressable,
+  ScrollView,
 } from 'react-native';
+import CalendarPicker from '../components/CalendarPicker';
+import TimePickerNative from '../components/TimePickerNative';
+import { detectIs12h } from '../utils/timeFormat';
 import { useFocusEffect } from '@react-navigation/native';
 import { listReminders, deleteReminder, syncReminders, updateReminder } from '../api/reminders.api';
 import { scheduleFromSync } from '../services/notifications';
@@ -27,6 +32,57 @@ import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
 import ActionSheet from '../components/ActionSheet';
 import PressableScale from '../components/PressableScale';
 
+const IS_12H = detectIs12h();
+
+function AnimatedExpand({ visible, children, expandedHeight = 400 }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      mountedRef.current = true;
+      setMounted(true);
+      progress.setValue(0);
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else if (mountedRef.current) {
+      Animated.timing(progress, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) {
+          mountedRef.current = false;
+          setMounted(false);
+        }
+      });
+    }
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!mounted) return null;
+
+  return (
+    <Animated.View
+      style={{
+        maxHeight: progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, expandedHeight],
+        }),
+        opacity: progress,
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 function formatDateTime(isoString) {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -36,13 +92,13 @@ function formatDateTime(isoString) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: IS_12H,
     timeZone: 'America/Sao_Paulo',
   }).format(date);
 }
 
-function formatDateForInput(isoString) {
-  if (!isoString) return '';
-  const date = new Date(isoString);
+function formatDateLabel(date) {
+  if (!date) return '';
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -51,33 +107,26 @@ function formatDateForInput(isoString) {
   }).format(date);
 }
 
-function formatTimeForInput(isoString) {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  return new Intl.DateTimeFormat('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'America/Sao_Paulo',
-    hour12: false,
-  }).format(date);
+function isoToPickerTime(isoString) {
+  if (!isoString) return { hours: 0, minutes: 0, period: 'AM' };
+  const d = new Date(isoString);
+  const rawHours = d.getHours();
+  const minutes = d.getMinutes();
+  if (!IS_12H) return { hours: rawHours, minutes, period: 'AM' };
+  const period = rawHours >= 12 ? 'PM' : 'AM';
+  const hours = rawHours % 12 || 12;
+  return { hours, minutes, period };
 }
 
-function parseBRDatetime(dateStr, timeStr) {
-  const dateParts = dateStr.trim().split('/');
-  const timeParts = timeStr.trim().split(':');
-  if (dateParts.length !== 3 || timeParts.length !== 2) return null;
-  const day = parseInt(dateParts[0], 10);
-  const month = parseInt(dateParts[1], 10) - 1;
-  const year = parseInt(dateParts[2], 10);
-  const hours = parseInt(timeParts[0], 10);
-  const minutes = parseInt(timeParts[1], 10);
-  if ([day, month, year, hours, minutes].some(isNaN)) return null;
-  if (month < 0 || month > 11 || day < 1 || day > 31) return null;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  if (year < 2024 || year > 2100) return null;
-  const date = new Date(year, month, day, hours, minutes, 0, 0);
-  if (isNaN(date.getTime())) return null;
-  return date.toISOString();
+function pickerTimeToDate(baseDate, pickerTime) {
+  const d = new Date(baseDate);
+  let hours = pickerTime.hours;
+  if (IS_12H) {
+    if (pickerTime.period === 'PM' && hours !== 12) hours += 12;
+    if (pickerTime.period === 'AM' && hours === 12) hours = 0;
+  }
+  d.setHours(hours, pickerTime.minutes, 0, 0);
+  return d;
 }
 
 function groupReminders(reminders) {
@@ -88,44 +137,108 @@ function groupReminders(reminders) {
 
 function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const styles = useMemo(() => makeModalStyles(theme), [theme]);
 
+  const sheetTranslateY = useRef(new Animated.Value(400)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 4,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) sheetTranslateY.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80) {
+          Animated.timing(sheetTranslateY, { toValue: 500, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+        } else {
+          Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+        }
+      },
+    }),
+  ).current;
+
   useEffect(() => {
-    if (reminder) {
+    if (visible && reminder) {
       setTitle(reminder.title);
-      setDate(formatDateForInput(reminder.next_execution));
-      setTime(formatTimeForInput(reminder.next_execution));
+      const d = reminder.next_execution ? new Date(reminder.next_execution) : new Date();
+      setSelectedDate(d);
+      setPickerTime(isoToPickerTime(reminder.next_execution));
       setErrors({});
+      setCalendarVisible(false);
+      setTimePickerVisible(false);
+      sheetTranslateY.setValue(400);
+      overlayOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, tension: 68, friction: 11 }),
+      ]).start();
     }
-  }, [reminder]);
+  }, [visible, reminder, sheetTranslateY, overlayOpacity]);
+
+  const handleClose = () => {
+    Animated.parallel([
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(sheetTranslateY, { toValue: 400, duration: 220, useNativeDriver: true }),
+    ]).start(onClose);
+  };
+
+  const toggleCalendar = () => {
+    setCalendarVisible(v => !v);
+    if (timePickerVisible) setTimePickerVisible(false);
+  };
+
+  const toggleTimePicker = () => {
+    setTimePickerVisible(v => !v);
+    if (calendarVisible) setCalendarVisible(false);
+  };
+
+  const handleDaySelect = day => {
+    setSelectedDate(day);
+    setCalendarVisible(false);
+    if (errors.datetime) setErrors(e => ({ ...e, datetime: null }));
+  };
 
   const handleSave = async () => {
     const newErrors = {};
     if (!title.trim()) newErrors.title = 'Título é obrigatório';
-    const parsed = parseBRDatetime(date, time);
-    if (!parsed) newErrors.datetime = 'Data/hora inválida — use DD/MM/AAAA e HH:MM';
+    if (!selectedDate) newErrors.datetime = 'Selecione uma data';
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
     setIsSaving(true);
     try {
-      await onSave(reminder.id, { title: title.trim(), scheduled_time: parsed });
+      const finalDate = pickerTimeToDate(selectedDate, pickerTime);
+      await onSave(reminder.id, { title: title.trim(), scheduled_time: finalDate.toISOString() });
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <TouchableOpacity style={styles.overlay} onPress={onClose} activeOpacity={1}>
-          <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+      <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
+          <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <Text style={styles.sheetTitle}>Editar lembrete</Text>
 
             <Text style={styles.label}>Título</Text>
@@ -141,43 +254,62 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
 
             <Text style={styles.label}>Data</Text>
-            <TextInput
-              style={[styles.input, errors.datetime && styles.inputError]}
-              value={date}
-              onChangeText={text => { setDate(text); if (errors.datetime) setErrors(e => ({ ...e, datetime: null })); }}
-              placeholder="DD/MM/AAAA"
-              placeholderTextColor={theme.textPlaceholder}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
+            <Pressable
+              style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
+              onPress={toggleCalendar}
+              disabled={isSaving}
+            >
+              <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
+                {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
+              </Text>
+              <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
+            </Pressable>
+            <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
+              <CalendarPicker
+                selectedDate={selectedDate}
+                onSelect={handleDaySelect}
+                theme={theme}
+              />
+            </AnimatedExpand>
 
-            <Text style={styles.label}>Horário</Text>
-            <TextInput
-              style={[styles.input, errors.datetime && styles.inputError]}
-              value={time}
-              onChangeText={text => { setTime(text); if (errors.datetime) setErrors(e => ({ ...e, datetime: null })); }}
-              placeholder="HH:MM"
-              placeholderTextColor={theme.textPlaceholder}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
+            <Text style={[styles.label, { marginTop: 14 }]}>Horário</Text>
+            <Pressable
+              style={[styles.dateButton, timePickerVisible && styles.dateButtonActive]}
+              onPress={toggleTimePicker}
+              disabled={isSaving}
+            >
+              <Text style={styles.dateButtonText}>
+                {IS_12H
+                  ? `${String(pickerTime.hours).padStart(2, '0')}:${String(pickerTime.minutes).padStart(2, '0')} ${pickerTime.period}`
+                  : `${String(pickerTime.hours).padStart(2, '0')}:${String(pickerTime.minutes).padStart(2, '0')}`}
+              </Text>
+              <Text style={[styles.dateChevron, timePickerVisible && styles.dateChevronOpen]}>›</Text>
+            </Pressable>
+            <AnimatedExpand visible={timePickerVisible} expandedHeight={175}>
+              <TimePickerNative
+                value={pickerTime}
+                onChange={setPickerTime}
+                is12h={IS_12H}
+                theme={theme}
+              />
+            </AnimatedExpand>
             {errors.datetime ? <Text style={styles.fieldError}>{errors.datetime}</Text> : null}
 
             <View style={styles.buttons}>
-              <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={onClose} disabled={isSaving}>
+              <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
                 <Text style={[styles.btnText, styles.btnCancelText]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnSave]} onPress={handleSave} disabled={isSaving}>
                 {isSaving ? (
-                  <LoadingDog size={20} color="#FFFFFF" />
+                  <LoadingDog size={28} color="#FFFFFF" />
                 ) : (
                   <Text style={[styles.btnText, styles.btnSaveText]}>Salvar</Text>
                 )}
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </KeyboardAvoidingView>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -205,10 +337,10 @@ function ReminderItem({ reminder, onEdit, onDelete, onLongPress, theme }) {
         setIsHolding(false);
         animatePress(1);
       }}
-      onLongPress={() => {
+      onLongPress={event => {
         setIsHolding(true);
         animatePress(1.02);
-        onLongPress(reminder);
+        onLongPress(reminder, event);
       }}
       delayLongPress={350}
     >
@@ -244,6 +376,7 @@ export default function RemindersScreen({ navigation }) {
   const [editingReminder, setEditingReminder] = useState(null);
   const [deletingReminder, setDeletingReminder] = useState(null);
   const [actionReminder, setActionReminder] = useState(null);
+  const [actionAnchor, setActionAnchor] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
   const hasLoadedRemindersRef = useRef(false);
@@ -318,8 +451,11 @@ export default function RemindersScreen({ navigation }) {
     setDeletingReminder(reminder);
   };
 
-  const handleReminderAction = reminder => {
+  const handleReminderAction = (reminder, event) => {
     setActionReminder(reminder);
+    if (event) {
+      setActionAnchor({ pageX: event.nativeEvent.pageX, pageY: event.nativeEvent.pageY });
+    }
   };
 
   const handleActionEdit = () => {
@@ -373,7 +509,7 @@ export default function RemindersScreen({ navigation }) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.centered}>
-          <LoadingDog size={56} color={theme.primary} />
+          <LoadingDog size={76} color={theme.primary} />
         </View>
       </SafeAreaView>
     );
@@ -475,13 +611,12 @@ export default function RemindersScreen({ navigation }) {
         />
         <ActionSheet
           visible={!!actionReminder}
-          title={actionReminder?.title || 'Lembrete'}
-          message="Escolha uma acao para este lembrete"
+          anchorPosition={actionAnchor}
           options={[
             { label: 'Editar', onPress: handleActionEdit },
             { label: 'Excluir', destructive: true, onPress: handleActionDelete },
           ]}
-          onCancel={() => setActionReminder(null)}
+          onCancel={() => { setActionReminder(null); setActionAnchor(null); }}
         />
         <HamburgerMenu
           visible={menuVisible}
@@ -616,25 +751,34 @@ function makeItemStyles(theme) {
 function makeModalStyles(theme) {
   return StyleSheet.create({
     overlay: {
-      flex: 1,
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.5)',
       justifyContent: 'flex-end',
     },
     sheet: {
       backgroundColor: theme.surface,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingHorizontal: 24,
-      paddingBottom: 40,
+      borderTopLeftRadius: 22,
+      borderTopRightRadius: 22,
+      maxHeight: '90%',
+    },
+    handleArea: {
       paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'center',
     },
     handle: {
       width: 40,
       height: 4,
       backgroundColor: theme.border,
       borderRadius: 2,
-      alignSelf: 'center',
-      marginBottom: 20,
+    },
+    scrollContent: {
+      paddingHorizontal: 24,
+      paddingBottom: 40,
     },
     sheetTitle: {
       fontSize: 18,
@@ -642,6 +786,7 @@ function makeModalStyles(theme) {
       color: theme.textPrimary,
       fontFamily: 'System',
       marginBottom: 20,
+      marginTop: 8,
     },
     label: {
       fontSize: 13,
@@ -663,18 +808,53 @@ function makeModalStyles(theme) {
       marginBottom: 14,
     },
     inputError: { borderColor: theme.error },
+    dateButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: theme.surface2,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+      marginBottom: 2,
+    },
+    dateButtonActive: {
+      borderColor: theme.primary,
+    },
+    dateButtonText: {
+      fontSize: 15,
+      color: theme.textPrimary,
+      fontFamily: 'System',
+    },
+    dateButtonPlaceholder: {
+      fontSize: 15,
+      color: theme.textPlaceholder,
+      fontFamily: 'System',
+    },
+    dateChevron: {
+      fontSize: 20,
+      color: theme.textSecondary,
+      fontWeight: '600',
+      transform: [{ rotate: '90deg' }],
+    },
+    dateChevronOpen: {
+      transform: [{ rotate: '-90deg' }],
+      color: theme.primary,
+    },
     fieldError: {
       color: theme.error,
       fontSize: 12,
-      marginTop: -10,
-      marginBottom: 10,
+      marginTop: 4,
+      marginBottom: 8,
       marginLeft: 4,
       fontFamily: 'System',
     },
     buttons: {
       flexDirection: 'row',
       gap: 12,
-      marginTop: 8,
+      marginTop: 20,
     },
     btn: {
       flex: 1,

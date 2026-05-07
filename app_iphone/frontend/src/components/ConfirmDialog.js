@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import PressableScale from './PressableScale';
 
@@ -15,11 +15,30 @@ export default function ConfirmDialog({
 }) {
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const fade = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.9)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fade, {
+        toValue: visible ? 1 : 0,
+        duration: visible ? 160 : 100,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: visible ? 1 : 0.9,
+        useNativeDriver: true,
+        tension: 180,
+        friction: 16,
+      }),
+    ]).start();
+  }, [fade, scale, visible]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <View style={styles.overlay}>
-        <View style={styles.dialog}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
+      <Animated.View style={[styles.overlay, { opacity: fade }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <Animated.View style={[styles.dialog, { transform: [{ scale }] }]}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           <View style={styles.actions}>
@@ -33,8 +52,8 @@ export default function ConfirmDialog({
               <Text style={styles.confirmText}>{confirmText}</Text>
             </PressableScale>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -42,39 +61,47 @@ export default function ConfirmDialog({
 function makeStyles(theme) {
   return StyleSheet.create({
     overlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.5)',
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: 24,
+      paddingHorizontal: 28,
     },
     dialog: {
       width: '100%',
-      maxWidth: 340,
+      maxWidth: 320,
       backgroundColor: theme.surface,
-      borderRadius: 18,
-      padding: 20,
+      borderRadius: 20,
+      paddingHorizontal: 22,
+      paddingTop: 24,
+      paddingBottom: 20,
       borderWidth: theme.isDark ? 1 : 0,
       borderColor: theme.border,
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: theme.isDark ? 0.4 : 0.18,
-      shadowRadius: 24,
-      elevation: 10,
+      shadowOffset: { width: 0, height: 16 },
+      shadowOpacity: theme.isDark ? 0.5 : 0.22,
+      shadowRadius: 28,
+      elevation: 12,
     },
     title: {
-      fontSize: 18,
+      fontSize: 17,
       fontWeight: '700',
       color: theme.textPrimary,
       fontFamily: 'System',
       marginBottom: 8,
+      textAlign: 'center',
     },
     message: {
-      fontSize: 15,
-      lineHeight: 22,
+      fontSize: 14,
+      lineHeight: 20,
       color: theme.textSecondary,
       fontFamily: 'System',
-      marginBottom: 20,
+      marginBottom: 22,
+      textAlign: 'center',
     },
     actions: {
       flexDirection: 'row',
@@ -82,11 +109,11 @@ function makeStyles(theme) {
     },
     button: {
       flex: 1,
-      minHeight: 44,
+      minHeight: 46,
       borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: 12,
+      paddingHorizontal: 10,
     },
     cancelButton: {
       backgroundColor: theme.surface2,
