@@ -14,6 +14,36 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [0.6.0] - 2026-05-07
+
+### Added
+- Hub de contas na autenticação, com contas salvas localmente, login rápido por conta e remoção de conta da lista
+- Endpoint `DELETE /api/v1/auth/account` e fluxo de exclusão definitiva de conta no app
+- Seletor visual de cor do avatar na tela Conta, persistido por conta salva
+- Componentes `CalendarPicker`, `TimePicker`, `TimePickerNative` e `utils/timeFormat.js` para edição visual de data/hora
+- Suporte a `@react-native-community/datetimepicker` no frontend iOS
+
+### Changed
+- LoadingDog padronizado como único loading do app, incluindo botões, splash, tela de lembretes e indicador de IA processando
+- Tela de edição de lembrete trocou inputs manuais de data/hora por calendário e seletor de horário com animação expansível
+- ActionSheet passou a abrir como menu contextual ancorado no toque longo de mensagens e lembretes
+- ConfirmDialog recebeu animação customizada de fade/scale e overlay clicável
+- Auth stack agora inicia no hub de contas e respeita o tema atual no fundo da navegação
+- Telas de Login, Register e AccountHub usam controles superiores consistentes para voltar e alternar tema
+- Chat envia `client_timestamp` com offset local explícito e aumenta timeout de mensagens para 90s
+- Cliente Gemini passou a usar chamadas assíncronas, fallback com cache de quota por modelo e menor limite de tokens para chat geral
+- Processamento de mensagens inicia resposta de chat geral de forma especulativa enquanto classifica intenção
+
+### Fixed
+- LoadingDog não para mais após uma volta no web e mantém cachorro e arco com a mesma cor
+- Swipe lateral do Chat não é acionado enquanto o campo de mensagem está focado
+- Senhas em Login, Register e Alterar senha removem emojis antes do envio
+- Toggle de tema em telas de autenticação mantém fade consistente no web
+- Sincronização silenciosa após falha de rede no Chat evita mensagem duplicada quando o servidor processou a ação
+- Formatação de horário respeita relógio 12h/24h do dispositivo em mensagens e lembretes
+
+---
+
 ## [0.5.0] - 2026-05-06
 
 ### Added
