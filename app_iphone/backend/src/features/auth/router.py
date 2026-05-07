@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.dependencies import get_current_user
 from src.core.limiter import limiter
-from src.features.auth.schemas import AuthResponse, ChangePasswordRequest, LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest
-from src.features.auth.service import change_password, login_user, refresh_tokens, register_user
+from src.features.auth.schemas import AuthResponse, ChangePasswordRequest, DeleteAccountRequest, LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest
+from src.features.auth.service import change_password, delete_user_account, login_user, refresh_tokens, register_user
 from src.models.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -39,6 +39,16 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
 ) -> RefreshResponse:
     return await refresh_tokens(db, payload)
+
+
+@router.delete("/account", status_code=status.HTTP_200_OK)
+@limiter.limit("3/minute")
+async def delete_account(
+    request: Request,
+    payload: DeleteAccountRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await delete_user_account(db, payload)
 
 
 @router.put("/password", status_code=status.HTTP_200_OK)

@@ -23,6 +23,7 @@ from src.features.auth.repository import (
 from src.features.auth.schemas import (
     AuthResponse,
     ChangePasswordRequest,
+    DeleteAccountRequest,
     LoginRequest,
     RefreshRequest,
     RefreshResponse,
@@ -140,6 +141,18 @@ async def refresh_tokens(db: AsyncSession, payload: RefreshRequest) -> RefreshRe
     await save_refresh_token(db, new_token)
 
     return RefreshResponse(access_token=new_access, refresh_token=raw_refresh)
+
+
+async def delete_user_account(db: AsyncSession, payload: DeleteAccountRequest) -> dict:
+    user = await get_user_by_email(db, payload.email)
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"detail": "Credenciais inválidas.", "code": "INVALID_CREDENTIALS"},
+        )
+    await db.delete(user)
+    await db.commit()
+    return {"message": "Conta excluída com sucesso."}
 
 
 async def change_password(

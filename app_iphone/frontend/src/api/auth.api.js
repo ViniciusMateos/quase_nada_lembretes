@@ -54,3 +54,10 @@ export async function changePassword({ current_password, new_password }) {
   });
   return response.data;
 }
+
+export async function deleteAccount({ email, password }) {
+  const response = await apiClient.delete('/api/v1/auth/account', {
+    data: { email, password },
+  });
+  return response.data;
+}

@@ -3,9 +3,7 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   KeyboardAvoidingView,
   ScrollView,
   Platform,
@@ -17,8 +15,16 @@ import { login as apiLogin } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ErrorBanner from '../components/ErrorBanner';
+import ChevronIcon from '../components/ChevronIcon';
+import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
+
+const removeEmoji = str =>
+  str.replace(
+    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|\u{FE0F}|\u{200D}/gu,
+    '',
+  );
 
 function getApiErrorMessage(error) {
   const status = error?.response?.status;
@@ -69,15 +75,16 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  const handleBackToAccountHub = () => {
+    if (navigation.canGoBack()) {
+      navigation.popToTop();
+      return;
+    }
+    navigation.navigate('AccountHub');
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
-      <PressableScale style={styles.themeToggle} onPress={toggleTheme} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Image
-          source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
-          style={{ width: 26, height: 26, tintColor: theme.textSecondary }}
-        />
-      </PressableScale>
-
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Image
@@ -118,7 +125,7 @@ export default function LoginScreen({ navigation }) {
                 placeholder="Sua senha"
                 placeholderTextColor={theme.textPlaceholder}
                 value={password}
-                onChangeText={text => { setPassword(text); if (passwordError && text) setPasswordError(null); }}
+                onChangeText={text => { const clean = removeEmoji(text); setPassword(clean); if (passwordError && clean) setPasswordError(null); }}
                 secureTextEntry={!showPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleSubmit}
@@ -145,7 +152,7 @@ export default function LoginScreen({ navigation }) {
             accessibilityState={{ disabled: isLoading }}
           >
             {isLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <LoadingDog size={28} color="#FFFFFF" />
             ) : (
               <Text style={styles.buttonText}>Entrar</Text>
             )}
@@ -157,8 +164,36 @@ export default function LoginScreen({ navigation }) {
               <Text style={styles.footerLink}>Criar conta</Text>
             </PressableScale>
           </View>
+
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Rendered after KAV so they're on top in web's DOM stacking order */}
+      <PressableScale
+        style={styles.backBtn}
+        contentStyle={styles.iconButtonContent}
+        applyStyleToRoot
+        onPress={handleBackToAccountHub}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel="Voltar para o hub de contas"
+      >
+        <ChevronIcon color={theme.textSecondary} size={32} />
+      </PressableScale>
+      <PressableScale
+        style={styles.themeToggle}
+        contentStyle={styles.iconButtonContent}
+        applyStyleToRoot
+        onPress={toggleTheme}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel={isDark ? 'Ativar tema claro' : 'Ativar tema escuro'}
+      >
+        <Image
+          source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
+          style={{ width: 26, height: 26, tintColor: theme.textSecondary }}
+        />
+      </PressableScale>
     </SafeAreaView>
   );
 }
@@ -169,9 +204,27 @@ function makeStyles(theme) {
     flex: { flex: 1 },
     themeToggle: {
       position: 'absolute',
-      top: 56,
+      top: 24,
       right: 24,
-      zIndex: 10,
+      width: 44,
+      height: 44,
+      zIndex: 100,
+      elevation: 12,
+    },
+    backBtn: {
+      position: 'absolute',
+      top: 24,
+      left: 16,
+      width: 44,
+      height: 44,
+      zIndex: 100,
+      elevation: 12,
+    },
+    iconButtonContent: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     container: {
       flexGrow: 1,

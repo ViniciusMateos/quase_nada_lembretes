@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import AccountHubScreen from '../screens/AccountHubScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ChatScreen from '../screens/ChatScreen';
@@ -10,7 +11,6 @@ import RemindersScreen from '../screens/RemindersScreen';
 import AccountScreen from '../screens/AccountScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
 import LoadingDog from '../components/LoadingDog';
-import PressableScale from '../components/PressableScale';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -18,23 +18,25 @@ const Tab = createBottomTabNavigator();
 function SplashScreen() {
   return (
     <View style={styles.splash}>
-      <LoadingDog size={56} color="#FF8234" />
+      <LoadingDog size={76} color="#FF8234" />
     </View>
   );
 }
 
 function AuthStack() {
+  const { theme } = useTheme();
   return (
     <Stack.Navigator
-      initialRouteName="Register"
+      initialRouteName="AccountHub"
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#0A0A0F' },
+        contentStyle: { backgroundColor: theme.background },
         animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="AccountHub" component={AccountHubScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
     </Stack.Navigator>
   );
 }
@@ -54,14 +56,6 @@ function AppTabs() {
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarLabelStyle: { fontSize: 12, fontFamily: 'System', fontWeight: '500' },
-        tabBarButton: props => (
-          <PressableScale
-            {...props}
-            applyStyleToRoot
-            contentStyle={styles.tabButtonContent}
-            pressScale={0.92}
-          />
-        ),
       }}
     >
       <Tab.Screen
@@ -118,11 +112,6 @@ const styles = StyleSheet.create({
   splash: {
     flex: 1,
     backgroundColor: '#0A0A0F',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabButtonContent: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

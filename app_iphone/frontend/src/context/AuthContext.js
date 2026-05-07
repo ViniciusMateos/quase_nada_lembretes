@@ -13,10 +13,24 @@ export const storage = new MMKV();
 
 const AuthContext = createContext(null);
 
+function loadSavedAccounts() {
+  try {
+    const raw = storage.getString('saved_accounts');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedAccounts(accounts) {
+  storage.set('saved_accounts', JSON.stringify(accounts));
+}
+
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [savedAccounts, setSavedAccounts] = useState([]);
 
   useEffect(() => {
     try {
@@ -32,9 +46,36 @@ export function AuthProvider({ children }) {
       storage.delete('auth_user');
       storage.delete('refresh_token');
     } finally {
+      setSavedAccounts(loadSavedAccounts());
       setIsLoading(false);
     }
   }, []);
+
+  const _upsertSavedAccount = (newUser) => {
+    setSavedAccounts(prev => {
+      const existing = prev.find(a => a.email === newUser.email);
+      const filtered = prev.filter(a => a.email !== newUser.email);
+      const updated = [{ ...existing, id: newUser.id, name: newUser.name, email: newUser.email }, ...filtered];
+      persistSavedAccounts(updated);
+      return updated;
+    });
+  };
+
+  const removeSavedAccount = (email) => {
+    setSavedAccounts(prev => {
+      const updated = prev.filter(a => a.email !== email);
+      persistSavedAccounts(updated);
+      return updated;
+    });
+  };
+
+  const updateSavedAccount = (email, updates) => {
+    setSavedAccounts(prev => {
+      const updated = prev.map(a => a.email === email ? { ...a, ...updates } : a);
+      persistSavedAccounts(updated);
+      return updated;
+    });
+  };
 
   const login = (newToken, newUser, newRefreshToken) => {
     storage.set('auth_token', newToken);
@@ -42,6 +83,7 @@ export function AuthProvider({ children }) {
     if (newRefreshToken) storage.set('refresh_token', newRefreshToken);
     setToken(newToken);
     setUser(newUser);
+    _upsertSavedAccount(newUser);
   };
 
   const logout = () => {
@@ -72,6 +114,9 @@ export function AuthProvider({ children }) {
         isAuthenticated,
         login,
         logout,
+        savedAccounts,
+        removeSavedAccount,
+        updateSavedAccount,
       }}
     >
       {children}
