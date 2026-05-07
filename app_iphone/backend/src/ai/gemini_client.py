@@ -6,6 +6,7 @@ Handles intent classification and general chat for the Quase Nada app.
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import google.generativeai as genai
@@ -14,12 +15,31 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+genai.configure(api_key=settings.google_api_key)
+
 MODELOS_PREFERIDOS = [
     "models/gemini-2.5-flash-lite",
+    "models/gemini-1.5-flash-8b",
+    "models/gemini-1.5-flash",
     "models/gemini-2.5-flash",
     "models/gemini-2.5-pro",
     "models/gemini-flash-latest",
 ]
+
+# Quota cache: model_name -> timestamp until which it stays blocked (1h cooldown)
+_quota_blocked_until: dict[str, float] = {}
+_QUOTA_COOLDOWN_SECONDS = 3600
+
+
+def _is_quota_blocked(model_name: str) -> bool:
+    blocked_until = _quota_blocked_until.get(model_name, 0)
+    return time.monotonic() < blocked_until
+
+
+def _mark_quota_exceeded(model_name: str) -> None:
+    _quota_blocked_until[model_name] = time.monotonic() + _QUOTA_COOLDOWN_SECONDS
+    logger.warning("Model %s quota exceeded — blocked for 1 hour.", model_name)
+
 
 INTENT_CLASSIFICATION_PROMPT = """Você é um sistema de extração de dados. Responda APENAS com JSON válido, sem markdown, sem explicações.
 
@@ -104,14 +124,15 @@ Ajude o usuário com dúvidas sobre o app, lembretes e organização.
 Se não souber algo, seja honesto. Não invente informações."""
 
 
-def _configure_client() -> None:
-    genai.configure(api_key=settings.google_api_key)
-
-
 def _extract_json(text: str) -> dict[str, Any]:
     """Extract JSON from model response, handling markdown code blocks."""
     cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
     return json.loads(cleaned)
+
+
+def _available_models() -> list[str]:
+    """Return models not currently blocked by quota."""
+    return [m for m in MODELOS_PREFERIDOS if not _is_quota_blocked(m)]
 
 
 async def classify_intent(
@@ -121,21 +142,20 @@ async def classify_intent(
     """
     Classify the intent of a user message and extract relevant data.
     Returns dict with 'intencao' and 'dados' keys.
-    Falls back through MODELOS_PREFERIDOS on 429/404 errors.
+    Falls back through MODELOS_PREFERIDOS on 429/404 errors; quota-exceeded
+    models are skipped for 1 hour before being retried.
     """
-    _configure_client()
     prompt = INTENT_CLASSIFICATION_PROMPT.format(
         user_message=user_message,
         current_datetime=current_datetime,
     )
 
     last_error: Exception | None = None
-    model_used: str | None = None
 
-    for model_name in MODELOS_PREFERIDOS:
+    for model_name in _available_models():
         try:
             model = genai.GenerativeModel(model_name)
-            response = model.generate_content(
+            response = await model.generate_content_async(
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.1,
@@ -152,8 +172,12 @@ async def classify_intent(
             continue
         except Exception as e:
             err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "404" in err_str or "not found" in err_str:
-                logger.warning("Model %s unavailable (%s), trying next.", model_name, e)
+            if "429" in err_str or "quota" in err_str:
+                _mark_quota_exceeded(model_name)
+                last_error = e
+                continue
+            if "404" in err_str or "not found" in err_str:
+                logger.warning("Model %s not found, skipping.", model_name)
                 last_error = e
                 continue
             logger.error("Unexpected error with model %s: %s", model_name, e)
@@ -171,7 +195,6 @@ async def chat_general(
     Generate a conversational response in PT-BR.
     Returns (response_text, model_used).
     """
-    _configure_client()
     last_error: Exception | None = None
 
     gemini_history = []
@@ -180,26 +203,30 @@ async def chat_general(
             role = "user" if entry["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [entry["content"]]})
 
-    for model_name in MODELOS_PREFERIDOS:
+    for model_name in _available_models():
         try:
             model = genai.GenerativeModel(
                 model_name,
                 system_instruction=CHAT_SYSTEM_PROMPT,
             )
             chat = model.start_chat(history=gemini_history)
-            response = chat.send_message(
+            response = await chat.send_message_async(
                 user_message,
                 generation_config=genai.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=1024,
+                    max_output_tokens=512,
                 ),
             )
             logger.info("Chat response generated using model: %s", model_name)
             return response.text, model_name
         except Exception as e:
             err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "404" in err_str or "not found" in err_str:
-                logger.warning("Model %s unavailable (%s), trying next.", model_name, e)
+            if "429" in err_str or "quota" in err_str:
+                _mark_quota_exceeded(model_name)
+                last_error = e
+                continue
+            if "404" in err_str or "not found" in err_str:
+                logger.warning("Model %s not found, skipping.", model_name)
                 last_error = e
                 continue
             logger.error("Unexpected error with model %s: %s", model_name, e)

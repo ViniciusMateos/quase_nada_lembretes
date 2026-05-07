@@ -3,6 +3,7 @@ Message orchestration service.
 Classifies intent via Gemini → executes action → saves history → returns response.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -64,7 +65,13 @@ async def process_message(
 ) -> MessageResponse:
     message_id = str(uuid.uuid4())
 
+    # Buscar histórico ANTES de salvar a mensagem atual para não duplicar
+    history = await _get_recent_history(db, user.id)
+
     await _save_history(db, user.id, "user", payload.content)
+    chat_task: asyncio.Task | None = asyncio.create_task(
+        chat_general(payload.content, history)
+    )
 
     try:
         classification = await classify_intent(
@@ -72,6 +79,8 @@ async def process_message(
             current_datetime=payload.client_timestamp,
         )
     except Exception as e:
+        if chat_task and not chat_task.done():
+            chat_task.cancel()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"detail": "Serviço de IA temporariamente indisponível.", "code": "AI_UNAVAILABLE"},
@@ -82,6 +91,10 @@ async def process_message(
     model_used: str = classification.get("_model_used", "unknown")
     action: dict[str, Any] | None = None
     response_text: str = ""
+
+    # Cancelar chat especulativo se a intenção não for CHAT_GERAL
+    if intent != "CHAT_GERAL" and chat_task and not chat_task.done():
+        chat_task.cancel()
 
     # ── CRIAR_LEMBRETE ──
     if intent == "CRIAR_LEMBRETE":
@@ -158,9 +171,8 @@ async def process_message(
     # ── CHAT_GERAL ──
     else:
         intent = "CHAT_GERAL"
-        history = await _get_recent_history(db, user.id)
         try:
-            response_text, model_used = await chat_general(payload.content, history)
+            response_text, model_used = await chat_task
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

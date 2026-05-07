@@ -9,7 +9,6 @@ import {
   Platform,
   SafeAreaView,
   Text,
-  ActivityIndicator,
   Animated,
   Image,
   PanResponder,
@@ -25,6 +24,7 @@ import TypingIndicator from '../components/TypingIndicator';
 import ReminderAmbiguousModal from '../components/ReminderAmbiguousModal';
 import NotificationPermissionBanner from '../components/NotificationPermissionBanner';
 import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
+import LoadingDog from '../components/LoadingDog';
 import PressableScale from '../components/PressableScale';
 import useFocusEntrance from '../hooks/useFocusEntrance';
 import { playReceiveSound, playSendSound, preloadSounds } from '../services/sounds';
@@ -60,7 +60,9 @@ export default function ChatScreen({ navigation }) {
   const swipePan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > Math.abs(g.dy) * 2 && Math.abs(g.dx) > 20,
+        !isInputFocusedRef.current &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 2 &&
+        Math.abs(g.dx) > 20,
       onPanResponderMove: (_, g) => {
         if (g.dx < 0) {
           swipeTranslateX.setValue(Math.max(g.dx, -screenWidth));
@@ -94,6 +96,8 @@ export default function ChatScreen({ navigation }) {
       },
     }),
   ).current;
+
+  const isInputFocusedRef = useRef(false);
 
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
@@ -176,11 +180,20 @@ export default function ChatScreen({ navigation }) {
     setInputText('');
     inputRef.current?.clear();
 
+    const now = new Date();
+    const offsetMin = -now.getTimezoneOffset();
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const absH = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0');
+    const absM = String(Math.abs(offsetMin) % 60).padStart(2, '0');
+    const localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+      .toISOString()
+      .replace('Z', `${sign}${absH}:${absM}`);
+
     const userMessage = {
       id: generateId(),
       role: 'user',
       content,
-      timestamp: new Date().toISOString(),
+      timestamp: localISO,
       action: null,
     };
 
@@ -232,17 +245,10 @@ export default function ChatScreen({ navigation }) {
       const isNetworkError = !error?.response;
 
       if (isNetworkError) {
-        // Conexão caiu — servidor pode ter processado. Tenta sync antes de mostrar erro.
         try {
           const syncData = await syncReminders();
           await scheduleFromSync(syncData);
-          addMessage({
-            id: generateId(),
-            role: 'assistant',
-            content: 'Conexão caiu durante o envio, mas sincronizei com o servidor.\nSe você criou um lembrete, ele já está agendado.',
-            timestamp: new Date().toISOString(),
-            action: null,
-          });
+          // sync silencioso — lista atualiza ao ganhar foco
         } catch {
           addMessage({
             id: generateId(),
@@ -366,6 +372,9 @@ export default function ChatScreen({ navigation }) {
             enablesReturnKeyAutomatically
             onSubmitEditing={handleSend}
             editable={!isLoading}
+            onFocus={() => { isInputFocusedRef.current = true; }}
+            onBlur={() => { isInputFocusedRef.current = false; }}
+            contextMenuHidden={false}
             accessibilityLabel="Campo de mensagem"
           />
           <AnimatedTouchableOpacity
@@ -386,7 +395,7 @@ export default function ChatScreen({ navigation }) {
             accessibilityState={{ disabled: !canSend }}
           >
             {isLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <LoadingDog size={28} color="#FFFFFF" />
             ) : (
               <Text style={styles.sendButtonText}>↑</Text>
             )}

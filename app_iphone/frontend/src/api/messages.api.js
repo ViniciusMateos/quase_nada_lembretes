@@ -20,6 +20,6 @@ export async function sendMessage({ content, client_timestamp }) {
   const response = await apiClient.post('/api/v1/messages', {
     content,
     client_timestamp,
-  });
+  }, { timeout: 90000 });
   return response.data;
 }
