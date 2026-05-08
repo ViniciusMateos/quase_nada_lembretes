@@ -3,6 +3,7 @@ Gemini AI client with model fallback support.
 Handles intent classification and general chat for the Quase Nada app.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -19,11 +20,16 @@ genai.configure(api_key=settings.google_api_key)
 
 MODELOS_PREFERIDOS = [
     "models/gemini-2.5-flash-lite",
+    "models/gemini-3.1-flash-lite",   # 500 RPD — grande reserva
+    "models/gemini-2.5-flash",
+    "models/gemini-3-flash",
+    "models/gemini-2.0-flash",
+    "models/gemini-2.0-flash-lite",
     "models/gemini-1.5-flash-8b",
     "models/gemini-1.5-flash",
-    "models/gemini-2.5-flash",
     "models/gemini-2.5-pro",
-    "models/gemini-flash-latest",
+    "models/gemma-3-27b-it",          # 14.4K RPD — reserva enorme
+    "models/gemma-3-12b-it",
 ]
 
 # Quota cache: model_name -> timestamp until which it stays blocked (1h cooldown)
@@ -41,7 +47,8 @@ def _mark_quota_exceeded(model_name: str) -> None:
     logger.warning("Model %s quota exceeded — blocked for 1 hour.", model_name)
 
 
-INTENT_CLASSIFICATION_PROMPT = """Você é um sistema de extração de dados. Responda APENAS com JSON válido, sem markdown, sem explicações.
+# Prefixo estático — nunca muda entre requisições, ativa o implicit cache do Gemini
+_INTENT_PROMPT_PREFIX = """Você é um sistema de extração de dados. Responda APENAS com JSON válido, sem markdown, sem explicações.
 
 Classifique a mensagem do usuário e extraia os dados relevantes.
 
@@ -75,11 +82,7 @@ Para DELETAR_LEMBRETE, extraia:
 Para LISTAR_LEMBRETES: sem dados extras.
 Para CHAT_GERAL: sem dados extras.
 
-Data/hora atual do cliente (use como referência para calcular datas): {current_datetime}
-
-=== EXEMPLOS (few-shot) ===
-
-Referência para os exemplos abaixo: current_datetime = 2026-04-24T12:00:00-03:00
+=== EXEMPLOS (few-shot, referência: 2026-04-24T12:00:00-03:00) ===
 
 Mensagem: "me lembra de comer daqui 5 minutos"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Comer", "data_hora": "2026-04-24T12:05:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
@@ -111,12 +114,30 @@ Mensagem: "a cada 30 minutos me lembra de alongar"
 Mensagem: "me lembra de comer daqui 1 hora"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Comer", "data_hora": "2026-04-24T13:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
 
+Mensagem: "oi"
+{{"intencao": "CHAT_GERAL", "dados": {{}}}}
+
+Mensagem: "quais são meus lembretes?"
+{{"intencao": "LISTAR_LEMBRETES", "dados": {{}}}}
+
+Mensagem: "cancela o lembrete de academia"
+{{"intencao": "DELETAR_LEMBRETE", "dados": {{"titulo_busca": "academia"}}}}
+
 === FIM DOS EXEMPLOS ===
 
+"""
+
+# Sufixo dinâmico — apenas as variáveis que mudam por requisição
+_INTENT_PROMPT_SUFFIX = """Data/hora atual do cliente: {current_datetime}
 Mensagem do usuário: {user_message}
 
-Responda SOMENTE com JSON válido. Para data_hora, calcule o valor real baseado em {current_datetime}. Nunca coloque instruções como "CALCULE:" no JSON final — apenas o valor ISO 8601 calculado.
-"""
+Responda SOMENTE com JSON válido. Nunca coloque instruções como "CALCULE:" no JSON — apenas o valor ISO 8601 calculado."""
+
+def _build_intent_prompt(user_message: str, current_datetime: str) -> str:
+    return _INTENT_PROMPT_PREFIX + _INTENT_PROMPT_SUFFIX.format(
+        current_datetime=current_datetime,
+        user_message=user_message,
+    )
 
 CHAT_SYSTEM_PROMPT = """Você é o assistente de lembretes do app Quase Nada.
 Responda em português brasileiro de forma conversacional, amigável e concisa.
@@ -145,27 +166,32 @@ async def classify_intent(
     Falls back through MODELOS_PREFERIDOS on 429/404 errors; quota-exceeded
     models are skipped for 1 hour before being retried.
     """
-    prompt = INTENT_CLASSIFICATION_PROMPT.format(
-        user_message=user_message,
-        current_datetime=current_datetime,
-    )
+    prompt = _build_intent_prompt(user_message, current_datetime)
 
     last_error: Exception | None = None
 
     for model_name in _available_models():
         try:
             model = genai.GenerativeModel(model_name)
-            response = await model.generate_content_async(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=512,
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=512,
+                    ),
+                    request_options={"timeout": 8, "retry": None},
                 ),
+                timeout=10,
             )
             result = _extract_json(response.text)
             result["_model_used"] = model_name
             logger.info("Intent classified using model: %s", model_name)
             return result
+        except asyncio.TimeoutError:
+            logger.warning("Model %s timed out, skipping.", model_name)
+            last_error = Exception(f"Timeout on {model_name}")
+            continue
         except json.JSONDecodeError as e:
             logger.warning("Model %s returned invalid JSON: %s", model_name, e)
             last_error = e
@@ -210,15 +236,23 @@ async def chat_general(
                 system_instruction=CHAT_SYSTEM_PROMPT,
             )
             chat = model.start_chat(history=gemini_history)
-            response = await chat.send_message_async(
-                user_message,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=512,
+            response = await asyncio.wait_for(
+                chat.send_message_async(
+                    user_message,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.7,
+                        max_output_tokens=512,
+                    ),
+                    request_options={"timeout": 8, "retry": None},
                 ),
+                timeout=10,
             )
             logger.info("Chat response generated using model: %s", model_name)
             return response.text, model_name
+        except asyncio.TimeoutError:
+            logger.warning("Model %s timed out on chat, skipping.", model_name)
+            last_error = Exception(f"Timeout on {model_name}")
+            continue
         except Exception as e:
             err_str = str(e).lower()
             if "429" in err_str or "quota" in err_str:
