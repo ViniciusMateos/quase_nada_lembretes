@@ -9,6 +9,19 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] - 2026-05-08
+
+Primeira versão estável do **Quase Nada Lembretes** para iOS.
+
+### Changed
+- Cadeia de fallback de modelos Gemini ampliada de 6 para 11 modelos, incluindo `gemini-3.1-flash-lite` (500 RPD) e `gemma-3-27b-it` / `gemma-3-12b-it` como reserva de emergência (14.4K RPD)
+- Prompt de classificação de intenção reestruturado: prefixo estático separado do sufixo dinâmico, ativando o implicit caching automático do Gemini a partir da segunda requisição
+- Timeout de 8s por chamada à API (SDK) + 10s de hard limit via `asyncio.wait_for` — modelos lentos não travam a fila
+- `retry=None` no SDK do Gemini: erros 429 propagam imediatamente sem backoff interno, passando direto para o próximo modelo da cadeia
+- Adicionados exemplos few-shot para `CHAT_GERAL`, `LISTAR_LEMBRETES` e `DELETAR_LEMBRETE` no prompt de classificação
+
 ### Known Issues
 - App expira em 7 dias se instalado via Sideloadly com conta gratuita Apple
 
@@ -24,7 +37,7 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 - Suporte a `@react-native-community/datetimepicker` no frontend iOS
 
 ### Changed
-- LoadingDog padronizado como único loading do app, incluindo botões, splash, tela de lembretes e indicador de IA processando
+- LoadingDog padronizado comoMover as variáveis pro final é a mudança de 2 minutos que ativa o cache automático em todas as requisições único loading do app, incluindo botões, splash, tela de lembretes e indicador de IA processando
 - Tela de edição de lembrete trocou inputs manuais de data/hora por calendário e seletor de horário com animação expansível
 - ActionSheet passou a abrir como menu contextual ancorado no toque longo de mensagens e lembretes
 - ConfirmDialog recebeu animação customizada de fade/scale e overlay clicável
