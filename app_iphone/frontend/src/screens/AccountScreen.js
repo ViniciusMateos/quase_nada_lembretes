@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
   Image,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   PanResponder,
   Platform,
@@ -88,6 +89,7 @@ export default function AccountScreen({ navigation }) {
   // Delete modal animation
   const deleteOverlayOpacity = useRef(new Animated.Value(0)).current;
   const deleteSheetEntry = useRef(new Animated.Value(400)).current;
+  const deleteKeyboardOffset = useRef(new Animated.Value(0)).current;
 
   const [confirmLogoutVisible, setConfirmLogoutVisible] = useState(false);
   const [colorPickerVisible, setColorPickerVisible] = useState(false);
@@ -116,6 +118,8 @@ export default function AccountScreen({ navigation }) {
   };
 
   const closeDeleteSheet = () => {
+    Keyboard.dismiss();
+    deleteKeyboardOffset.setValue(0);
     Animated.parallel([
       Animated.timing(deleteOverlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
       Animated.timing(deleteSheetEntry, { toValue: 400, duration: 200, useNativeDriver: true }),
@@ -123,6 +127,25 @@ export default function AccountScreen({ navigation }) {
   };
 
   closeDeleteSheetRef.current = closeDeleteSheet;
+
+  useEffect(() => {
+    if (!deleteSheetVisible) return;
+    const show = Keyboard.addListener('keyboardWillShow', e => {
+      Animated.timing(deleteKeyboardOffset, {
+        toValue: -e.endCoordinates.height,
+        duration: e.duration || 250,
+        useNativeDriver: true,
+      }).start();
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', e => {
+      Animated.timing(deleteKeyboardOffset, {
+        toValue: 0,
+        duration: e.duration || 250,
+        useNativeDriver: true,
+      }).start();
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [deleteSheetVisible, deleteKeyboardOffset]);
 
   const deletePanResponder = useRef(
     PanResponder.create({
@@ -221,7 +244,10 @@ export default function AccountScreen({ navigation }) {
                   onPress={() => setColorPickerVisible(v => !v)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={[styles.editColorIcon, { color: theme.textSecondary }]}>✏</Text>
+                  <Image
+                    source={require('../../assets/lapis-icon.png')}
+                    style={[styles.editColorIcon, { tintColor: theme.textSecondary }]}
+                  />
                 </PressableScale>
               </View>
 
@@ -296,13 +322,13 @@ export default function AccountScreen({ navigation }) {
           <Animated.View
             style={[
               styles.deleteSheet,
-              { backgroundColor: theme.surface, transform: [{ translateY: deleteSheetEntry }] },
+              { backgroundColor: theme.surface, transform: [{ translateY: Animated.add(deleteSheetEntry, deleteKeyboardOffset) }] },
             ]}
           >
             <View style={styles.sheetHandle} {...deletePanResponder.panHandlers}>
               <View style={[styles.handle, { backgroundColor: theme.border }]} />
             </View>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View>
               <Text style={[styles.deleteTitle, { color: theme.textPrimary }]}>Excluir conta</Text>
               <Text style={[styles.deleteWarning, { color: theme.textSecondary }]}>
                 Esta ação é irreversível. Todos os seus lembretes e dados serão permanentemente apagados.
@@ -357,7 +383,7 @@ export default function AccountScreen({ navigation }) {
                   </PressableScale>
                 </View>
               </View>
-            </KeyboardAvoidingView>
+            </View>
           </Animated.View>
         </Animated.View>
       </Modal>
@@ -419,7 +445,7 @@ function makeStyles(theme) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    editColorIcon: { fontSize: 13 },
+    editColorIcon: { width: 14, height: 14, resizeMode: 'contain' },
     colorPicker: {
       borderRadius: 14,
       borderWidth: 1,

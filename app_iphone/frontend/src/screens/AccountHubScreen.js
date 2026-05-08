@@ -1,8 +1,8 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Image,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   PanResponder,
   Platform,
@@ -16,6 +16,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { login as apiLogin } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -70,7 +71,8 @@ export default function AccountHubScreen({ navigation }) {
   const { theme, isDark, toggleTheme } = useTheme();
   const { width } = useWindowDimensions();
   const logoSize = Math.min(width * 0.28, 100);
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(theme, insets), [theme, insets]);
 
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [password, setPassword] = useState('');
@@ -82,6 +84,7 @@ export default function AccountHubScreen({ navigation }) {
 
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslateY = useRef(new Animated.Value(320)).current;
+  const keyboardOffset = useRef(new Animated.Value(0)).current;
 
   const closeModalRef = useRef(null);
 
@@ -100,6 +103,8 @@ export default function AccountHubScreen({ navigation }) {
   };
 
   const closeModal = () => {
+    Keyboard.dismiss();
+    keyboardOffset.setValue(0);
     Animated.parallel([
       Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
       Animated.timing(sheetTranslateY, { toValue: 320, duration: 200, useNativeDriver: true }),
@@ -107,6 +112,25 @@ export default function AccountHubScreen({ navigation }) {
   };
 
   closeModalRef.current = closeModal;
+
+  useEffect(() => {
+    if (!selectedAccount) return;
+    const show = Keyboard.addListener('keyboardWillShow', e => {
+      Animated.timing(keyboardOffset, {
+        toValue: -e.endCoordinates.height,
+        duration: e.duration || 250,
+        useNativeDriver: true,
+      }).start();
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', e => {
+      Animated.timing(keyboardOffset, {
+        toValue: 0,
+        duration: e.duration || 250,
+        useNativeDriver: true,
+      }).start();
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [selectedAccount, keyboardOffset]);
 
   const sheetPanResponder = useRef(
     PanResponder.create({
@@ -211,12 +235,11 @@ export default function AccountHubScreen({ navigation }) {
       >
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={closeModal} />
-          <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
+          <Animated.View style={[styles.sheet, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
             <View style={styles.sheetHandle} {...sheetPanResponder.panHandlers}>
               <View style={styles.handle} />
             </View>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-              <View style={styles.sheetContent}>
+            <View style={styles.sheetContent}>
                 <View style={[styles.sheetAvatar, { backgroundColor: selectedAccount?.color || DEFAULT_AVATAR_COLOR }]}>
                   <Image
                     source={require('../../assets/logo.png')}
@@ -266,7 +289,6 @@ export default function AccountHubScreen({ navigation }) {
                   )}
                 </PressableScale>
               </View>
-            </KeyboardAvoidingView>
           </Animated.View>
         </Animated.View>
       </Modal>
@@ -303,12 +325,13 @@ export default function AccountHubScreen({ navigation }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, insets = { top: 0 }) {
+  const topOffset = (insets.top || 0) + 8;
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: theme.background },
     themeToggle: {
       position: 'absolute',
-      top: 24,
+      top: topOffset,
       right: 24,
       width: 44,
       height: 44,

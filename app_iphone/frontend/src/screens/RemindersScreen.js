@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   PanResponder,
   Animated,
@@ -147,16 +148,18 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
 
   const sheetTranslateY = useRef(new Animated.Value(400)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const keyboardOffset = useRef(new Animated.Value(0)).current;
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 4,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && g.vy > 0,
       onPanResponderMove: (_, g) => {
         if (g.dy > 0) sheetTranslateY.setValue(g.dy);
       },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80) {
+          Keyboard.dismiss();
+          keyboardOffset.setValue(0);
           Animated.timing(sheetTranslateY, { toValue: 500, duration: 220, useNativeDriver: true }).start(onClose);
           Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
         } else {
@@ -177,14 +180,28 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
       setTimePickerVisible(false);
       sheetTranslateY.setValue(400);
       overlayOpacity.setValue(0);
+      keyboardOffset.setValue(0);
       Animated.parallel([
         Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
         Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, tension: 68, friction: 11 }),
       ]).start();
     }
-  }, [visible, reminder, sheetTranslateY, overlayOpacity]);
+  }, [visible, reminder, sheetTranslateY, overlayOpacity, keyboardOffset]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const show = Keyboard.addListener('keyboardWillShow', e => {
+      Animated.timing(keyboardOffset, { toValue: -e.endCoordinates.height, duration: e.duration || 250, useNativeDriver: true }).start();
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', e => {
+      Animated.timing(keyboardOffset, { toValue: 0, duration: e.duration || 250, useNativeDriver: true }).start();
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [visible, keyboardOffset]);
 
   const handleClose = () => {
+    Keyboard.dismiss();
+    keyboardOffset.setValue(0);
     Animated.parallel([
       Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
       Animated.timing(sheetTranslateY, { toValue: 400, duration: 220, useNativeDriver: true }),
@@ -228,13 +245,12 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
           <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
           </View>
 
           <ScrollView
-            style={{ flex: 1 }}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -763,7 +779,7 @@ function makeModalStyles(theme) {
       backgroundColor: theme.surface,
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
-      maxHeight: '90%',
+      maxHeight: Dimensions.get('window').height * 0.88,
     },
     handleArea: {
       paddingTop: 12,

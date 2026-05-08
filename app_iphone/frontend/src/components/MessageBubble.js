@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import Clipboard from 'react-native/Libraries/Components/Clipboard/Clipboard';
 import { useTheme } from '../context/ThemeContext';
 import ActionSheet from './ActionSheet';
 import { detectIs12h } from '../utils/timeFormat';
@@ -31,15 +32,10 @@ function formatLocalDatetime(isoString) {
   }
 }
 
-async function copyText(text) {
+function copyText(text) {
   if (!text) return false;
-
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return true;
-  }
-
-  return false;
+  Clipboard.setString(text);
+  return true;
 }
 
 function AnimatedBubble({ children, message, styles, bubbleStyle }) {
@@ -60,10 +56,7 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
 
   const handleCopy = async () => {
     setCopySheetVisible(false);
-    const copied = await copyText(message.content);
-    if (!copied && Platform.OS !== 'web') {
-      Alert.alert('Texto da mensagem', message.content);
-    }
+    await copyText(message.content);
   };
 
   const animatePress = toValue => {

@@ -43,7 +43,7 @@ export default function TimePickerNative({ value, onChange, theme }) {
         mode="time"
         display="spinner"
         onChange={handleChange}
-        locale="pt-BR"
+        locale={IS_12H ? undefined : 'pt-BR'}
         textColor={theme.textPrimary}
         style={{ height: 132 }}
       />

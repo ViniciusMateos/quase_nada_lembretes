@@ -1,67 +1,13 @@
-import { Platform } from 'react-native';
+import { Vibration } from 'react-native';
 import { Audio } from 'expo-av';
 
-const SEND_SOUND = require('../../assets/sound-send.wav');
-const RECEIVE_SOUND = require('../../assets/sound-receive.wav');
+const ASSETS = {
+  send: require('../../assets/sound-send.wav'),
+  receive: require('../../assets/sound-receive.wav'),
+  reminder: require('../../assets/sound-reminder.wav'),
+};
 
 let audioModeReady = false;
-let webAudioContext = null;
-let sendSound = null;
-let receiveSound = null;
-let preloadPromise = null;
-
-function getWebAudioContext() {
-  if (typeof window === 'undefined') return null;
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return null;
-  if (!webAudioContext) webAudioContext = new AudioContext();
-  if (webAudioContext.state === 'suspended') {
-    webAudioContext.resume().catch(() => {});
-  }
-  return webAudioContext;
-}
-
-function playWebTone(kind) {
-  const context = getWebAudioContext();
-  if (!context) return;
-
-  const now = context.currentTime;
-  const gain = context.createGain();
-  gain.connect(context.destination);
-
-  if (kind === 'send') {
-    const osc = context.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(160, now);
-    osc.frequency.exponentialRampToValueAtTime(520, now + 0.16);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.018);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
-    osc.connect(gain);
-    osc.start(now);
-    osc.stop(now + 0.2);
-    return;
-  }
-
-  const first = context.createOscillator();
-  const second = context.createOscillator();
-  first.type = 'sine';
-  second.type = 'sine';
-  first.frequency.setValueAtTime(880, now);
-  second.frequency.setValueAtTime(1175, now + 0.09);
-
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.16, now + 0.018);
-  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.09);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-
-  first.connect(gain);
-  second.connect(gain);
-  first.start(now);
-  first.stop(now + 0.13);
-  second.start(now + 0.09);
-  second.stop(now + 0.27);
-}
 
 async function ensureAudioMode() {
   if (audioModeReady) return;
@@ -73,68 +19,47 @@ async function ensureAudioMode() {
       staysActiveInBackground: false,
     });
     audioModeReady = true;
+    console.log('[sounds] Audio mode configurado');
   } catch (error) {
-    console.warn('[sounds] Nao foi possivel configurar audio:', error);
+    console.error('[sounds] Erro ao configurar audio mode:', error);
   }
 }
 
-async function loadNativeSounds() {
-  if (Platform.OS === 'web') return;
-  await ensureAudioMode();
-
-  if (!sendSound) {
-    const result = await Audio.Sound.createAsync(SEND_SOUND, {
-      shouldPlay: false,
-      volume: 0.9,
-    });
-    sendSound = result.sound;
-  }
-
-  if (!receiveSound) {
-    const result = await Audio.Sound.createAsync(RECEIVE_SOUND, {
-      shouldPlay: false,
-      volume: 0.78,
-    });
-    receiveSound = result.sound;
-  }
-}
-
-export function preloadSounds() {
-  if (Platform.OS === 'web') return Promise.resolve();
-  if (!preloadPromise) {
-    preloadPromise = loadNativeSounds().catch(error => {
-      preloadPromise = null;
-      console.warn('[sounds] Nao foi possivel carregar sons:', error);
-    });
-  }
-  return preloadPromise;
-}
-
-async function playNativeSound(kind) {
+async function playSound(kind) {
   try {
-    await preloadSounds();
-    const sound = kind === 'send' ? sendSound : receiveSound;
-    if (!sound) return;
-    await sound.stopAsync().catch(() => {});
-    await sound.setPositionAsync(0);
-    await sound.replayAsync();
+    await ensureAudioMode();
+    console.log(`[sounds] Carregando som: ${kind}`);
+    const { sound } = await Audio.Sound.createAsync(ASSETS[kind], {
+      shouldPlay: true,
+      volume: 1.0,
+    });
+    console.log(`[sounds] Tocando som: ${kind}`);
+    sound.setOnPlaybackStatusUpdate(status => {
+      if (status.didJustFinish || status.error) {
+        if (status.error) console.error(`[sounds] Erro na reprodução: ${status.error}`);
+        sound.unloadAsync().catch(() => {});
+      }
+    });
   } catch (error) {
-    console.warn('[sounds] Nao foi possivel tocar som:', error);
+    console.error(`[sounds] Erro ao tocar ${kind}:`, error);
   }
+}
+
+// Preload não é mais necessário com o novo approach — mantido por compatibilidade
+export function preloadSounds() {
+  ensureAudioMode();
 }
 
 export function playSendSound() {
-  if (Platform.OS === 'web') {
-    playWebTone('send');
-    return;
-  }
-  return playNativeSound('send');
+  return playSound('send');
 }
 
 export function playReceiveSound() {
-  if (Platform.OS === 'web') {
-    playWebTone('receive');
-    return;
-  }
-  return playNativeSound('receive');
+  Vibration.vibrate(50);
+  return playSound('receive');
+}
+
+export function playReminderSound() {
+  Vibration.vibrate([100, 200, 100, 200]);
+  return playSound('reminder');
 }

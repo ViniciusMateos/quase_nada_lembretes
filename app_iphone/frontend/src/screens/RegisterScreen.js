@@ -11,6 +11,7 @@ import {
   Image,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { register } from '../api/auth.api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -69,7 +70,8 @@ export default function RegisterScreen({ navigation }) {
   const [rawError, setRawError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(theme, insets), [theme, insets]);
 
   const validateAll = () => {
     const newErrors = {
@@ -237,13 +239,14 @@ export default function RegisterScreen({ navigation }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, insets = { top: 0 }) {
+  const topOffset = (insets.top || 0) + 8;
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: theme.background },
     flex: { flex: 1 },
     themeToggle: {
       position: 'absolute',
-      top: 24,
+      top: topOffset,
       right: 24,
       width: 44,
       height: 44,
@@ -252,7 +255,7 @@ function makeStyles(theme) {
     },
     backBtn: {
       position: 'absolute',
-      top: 24,
+      top: topOffset,
       left: 16,
       width: 44,
       height: 44,
