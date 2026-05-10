@@ -189,10 +189,11 @@ async def update_reminder(
         )
 
     now = datetime.now(timezone.utc).isoformat()
+    update_values: dict = {"updated_at": now}
 
     if data.title is not None:
-        reminder.title = data.title
-        reminder.title_normalized = _normalize(data.title)
+        update_values["title"] = data.title
+        update_values["title_normalized"] = _normalize(data.title)
 
     if data.scheduled_time is not None:
         try:
@@ -201,19 +202,24 @@ async def update_reminder(
                 parsed = parsed.replace(tzinfo=timezone.utc)
             else:
                 parsed = parsed.astimezone(timezone.utc)
-            reminder.next_execution = parsed.isoformat()
+            update_values["next_execution"] = parsed.isoformat()
             if reminder.recurrence == "once":
-                reminder.is_active = 1
+                update_values["is_active"] = 1
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"detail": "Formato de data inválido. Use ISO 8601.", "code": "INVALID_DATE"},
             )
 
-    reminder.updated_at = now
-    await save_reminder(db, reminder)
+    await db.execute(
+        update(Reminder)
+        .where(Reminder.id == reminder_id, Reminder.user_id == user_id)
+        .values(**update_values)
+    )
     await db.commit()
-    return ReminderOut.from_orm(reminder)
+
+    updated = await get_reminder_by_id(db, reminder_id)
+    return ReminderOut.from_orm(updated)
 
 
 async def sync_reminders(
