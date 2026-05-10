@@ -18,7 +18,8 @@ from src.features.reminders.repository import (
     get_active_reminders_for_user,
     search_reminders_by_title,
 )
-from src.features.reminders.service import create_reminder_from_data, find_reminders_for_deletion
+from src.features.reminders.service import create_reminder_from_data, find_reminders_for_deletion, update_reminder
+from src.features.reminders.schemas import ReminderUpdate
 from src.features.reminders.schemas import ReminderOut
 from src.models.models import ChatHistory, User
 
@@ -142,6 +143,50 @@ async def process_message(
                 response_text += f" (mostrando os primeiros 20 de {total_reminders})"
         else:
             response_text = "Você não tem lembretes ativos no momento."
+
+    # ── EDITAR_LEMBRETE ──
+    elif intent == "EDITAR_LEMBRETE":
+        titulo_busca = dados.get("titulo_busca", "")
+        candidates = await find_reminders_for_deletion(db, user.id, titulo_busca)
+
+        if not candidates:
+            response_text = f"Não encontrei nenhum lembrete com '{titulo_busca}' para editar."
+            action = {"type": "reminder_not_found", "titulo_busca": titulo_busca}
+        elif len(candidates) > 1:
+            action = {
+                "type": "ambiguous",
+                "candidates": [ReminderOut.from_orm(r).model_dump() for r in candidates],
+            }
+            nomes = ", ".join(f"'{r.title}'" for r in candidates)
+            response_text = f"Encontrei mais de um lembrete: {nomes}. Qual você quer editar?"
+        else:
+            reminder = candidates[0]
+            patch = ReminderUpdate(
+                title=dados.get("novo_titulo"),
+                scheduled_time=dados.get("nova_data_hora"),
+            )
+            try:
+                updated = await update_reminder(db, reminder.id, user.id, patch)
+                action = {
+                    "type": "reminder_updated",
+                    "reminder": updated.model_dump(),
+                }
+                try:
+                    client_dt = datetime.fromisoformat(payload.client_timestamp)
+                    exec_dt = datetime.fromisoformat(updated.next_execution)
+                    if exec_dt.tzinfo is None:
+                        exec_dt = exec_dt.replace(tzinfo=timezone.utc)
+                    if client_dt.tzinfo is not None:
+                        exec_dt = exec_dt.astimezone(client_dt.tzinfo)
+                    exec_fmt = exec_dt.strftime("%d/%m/%Y às %H:%M")
+                except Exception:
+                    exec_fmt = updated.next_execution
+                response_text = f"Lembrete atualizado!\n{updated.title.upper()}\ndata: {exec_fmt}"
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={"detail": "Erro ao editar lembrete.", "code": "INTERNAL_ERROR"},
+                ) from e
 
     # ── DELETAR_LEMBRETE ──
     elif intent == "DELETAR_LEMBRETE":

@@ -54,9 +54,15 @@ Classifique a mensagem do usuário e extraia os dados relevantes.
 
 A "intencao" deve ser uma das seguintes:
 - "CRIAR_LEMBRETE": usuário quer criar/adicionar/agendar um lembrete
+- "EDITAR_LEMBRETE": usuário quer alterar/mudar/editar/atualizar um lembrete existente (data, horário ou título)
 - "DELETAR_LEMBRETE": usuário quer remover/apagar/cancelar um lembrete
 - "LISTAR_LEMBRETES": usuário quer ver/listar/consultar seus lembretes
 - "CHAT_GERAL": qualquer outra mensagem (saudação, dúvida, conversa)
+
+Para EDITAR_LEMBRETE, extraia:
+- titulo_busca: texto para localizar o lembrete a editar (obrigatório)
+- novo_titulo: novo título (se o usuário quiser mudar o nome, senão null)
+- nova_data_hora: nova data e hora ISO 8601 COM OFFSET (se quiser mudar quando dispara, senão null)
 
 Para CRIAR_LEMBRETE, extraia:
 - titulo: texto descritivo do lembrete (obrigatório)
@@ -122,6 +128,15 @@ Mensagem: "quais são meus lembretes?"
 
 Mensagem: "cancela o lembrete de academia"
 {{"intencao": "DELETAR_LEMBRETE", "dados": {{"titulo_busca": "academia"}}}}
+
+Mensagem: "muda o lembrete do médico para amanhã às 14h"
+{{"intencao": "EDITAR_LEMBRETE", "dados": {{"titulo_busca": "médico", "novo_titulo": null, "nova_data_hora": "2026-04-25T14:00:00-03:00"}}}}
+
+Mensagem: "renomeia o lembrete de reunião para daily"
+{{"intencao": "EDITAR_LEMBRETE", "dados": {{"titulo_busca": "reunião", "novo_titulo": "Daily", "nova_data_hora": null}}}}
+
+Mensagem: "altera o lembrete de academia para às 19h"
+{{"intencao": "EDITAR_LEMBRETE", "dados": {{"titulo_busca": "academia", "novo_titulo": null, "nova_data_hora": "2026-04-24T19:00:00-03:00"}}}}
 
 === FIM DOS EXEMPLOS ===
 
