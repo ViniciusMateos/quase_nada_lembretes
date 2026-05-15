@@ -1,0 +1,36 @@
+{
+  "cli": {
+    "version": ">= 10.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000",
+        "APP_VARIANT": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000"
+      }
+    },
+    "production": {
+      "ios": {
+        "distribution": "store"
+      },
+      "env": {
+        "API_BASE_URL": "http://147.15.7.119:8000"
+      }
+    }
+  }
+}
