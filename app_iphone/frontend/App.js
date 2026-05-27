@@ -6,15 +6,22 @@ import { StyleSheet } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { NotificationSettingsProvider } from './src/context/NotificationSettingsContext';
 import { navigationRef } from './src/api/client';
 import AppNavigator from './src/navigation/AppNavigator';
 import { playReminderSound } from './src/services/sounds';
+import { setupNotificationCategories, handleNotificationEvent } from './src/services/notifications';
+import { registerBackgroundQueueTask } from './src/services/backgroundTasks';
 
 export default function App() {
   useEffect(() => {
-    return notifee.onForegroundEvent(({ type }) => {
+    setupNotificationCategories();
+    registerBackgroundQueueTask();
+    return notifee.onForegroundEvent(async ({ type, detail }) => {
       if (type === EventType.DELIVERED) {
         playReminderSound();
+      } else if (type === EventType.ACTION_PRESS) {
+        await handleNotificationEvent({ type, detail });
       }
     });
   }, []);
@@ -23,11 +30,13 @@ export default function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AuthProvider>
-            <NavigationContainer ref={navigationRef}>
-              <AppNavigator />
-            </NavigationContainer>
-          </AuthProvider>
+          <NotificationSettingsProvider>
+            <AuthProvider>
+              <NavigationContainer ref={navigationRef}>
+                <AppNavigator />
+              </NavigationContainer>
+            </AuthProvider>
+          </NotificationSettingsProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -10,6 +10,7 @@ import ChatScreen from '../screens/ChatScreen';
 import RemindersScreen from '../screens/RemindersScreen';
 import AccountScreen from '../screens/AccountScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 import LoadingDog from '../components/LoadingDog';
 
 const Stack = createNativeStackNavigator();
@@ -94,6 +95,7 @@ function AppStack() {
       <Stack.Screen name="Main" component={AppTabs} />
       <Stack.Screen name="Account" component={AccountScreen} />
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+      <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
     </Stack.Navigator>
   );
 }

@@ -136,14 +136,31 @@ function groupReminders(reminders) {
   return { upcoming, recurring };
 }
 
+// Convenção weekday(): Seg=0 .. Dom=6
+const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const DAY_PRESETS = [
+  { label: 'Dias úteis', days: [0, 1, 2, 3, 4] },
+  { label: 'Fim de semana', days: [5, 6] },
+  { label: 'Todo dia', days: [0, 1, 2, 3, 4, 5, 6] },
+];
+
+function sameDays(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
 function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [title, setTitle] = useState('');
   const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDays, setSelectedDays] = useState([]);
   const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const isWeeklyDays = reminder?.recurrence === 'weekly_days';
   const styles = useMemo(() => makeModalStyles(theme), [theme]);
 
   const sheetTranslateY = useRef(new Animated.Value(400)).current;
@@ -174,6 +191,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
       setTitle(reminder.title);
       const d = reminder.next_execution ? new Date(reminder.next_execution) : new Date();
       setSelectedDate(d);
+      setSelectedDays(Array.isArray(reminder.days_of_week) ? reminder.days_of_week : []);
       setPickerTime(isoToPickerTime(reminder.next_execution));
       setErrors({});
       setCalendarVisible(false);
@@ -224,18 +242,34 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     if (errors.datetime) setErrors(e => ({ ...e, datetime: null }));
   };
 
+  const toggleDay = day => {
+    setSelectedDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day],
+    );
+    if (errors.days) setErrors(e => ({ ...e, days: null }));
+  };
+
   const handleSave = async () => {
     const newErrors = {};
     if (!title.trim()) newErrors.title = 'Título é obrigatório';
-    if (!selectedDate) newErrors.datetime = 'Selecione uma data';
+    if (isWeeklyDays) {
+      if (selectedDays.length === 0) newErrors.days = 'Selecione ao menos um dia';
+    } else if (!selectedDate) {
+      newErrors.datetime = 'Selecione uma data';
+    }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
     setIsSaving(true);
     try {
-      const finalDate = pickerTimeToDate(selectedDate, pickerTime);
-      await onSave(reminder.id, { title: title.trim(), scheduled_time: finalDate.toISOString() });
+      const baseDate = selectedDate || new Date();
+      const finalDate = pickerTimeToDate(baseDate, pickerTime);
+      const payload = { title: title.trim(), scheduled_time: finalDate.toISOString() };
+      if (isWeeklyDays) {
+        payload.days_of_week = [...selectedDays].sort((a, b) => a - b);
+      }
+      await onSave(reminder.id, payload);
     } finally {
       setIsSaving(false);
     }
@@ -269,24 +303,66 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             />
             {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
 
-            <Text style={styles.label}>Data</Text>
-            <Pressable
-              style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
-              onPress={toggleCalendar}
-              disabled={isSaving}
-            >
-              <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
-                {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
-              </Text>
-              <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
-            </Pressable>
-            <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
-              <CalendarPicker
-                selectedDate={selectedDate}
-                onSelect={handleDaySelect}
-                theme={theme}
-              />
-            </AnimatedExpand>
+            {isWeeklyDays ? (
+              <>
+                <Text style={styles.label}>Dias da semana</Text>
+                <View style={styles.presetRow}>
+                  {DAY_PRESETS.map(p => {
+                    const active = sameDays(selectedDays, p.days);
+                    return (
+                      <Pressable
+                        key={p.label}
+                        style={[styles.preset, active && styles.presetActive]}
+                        onPress={() => {
+                          setSelectedDays(p.days);
+                          if (errors.days) setErrors(e => ({ ...e, days: null }));
+                        }}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.presetText, active && styles.presetTextActive]}>{p.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={styles.pillRow}>
+                  {DAY_LABELS.map((lbl, idx) => {
+                    const on = selectedDays.includes(idx);
+                    return (
+                      <Pressable
+                        key={idx}
+                        style={[styles.pill, on && styles.pillActive]}
+                        onPress={() => toggleDay(idx)}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.pillText, on && styles.pillTextActive]}>{lbl}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {errors.days ? <Text style={styles.fieldError}>{errors.days}</Text> : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Data</Text>
+                <Pressable
+                  style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
+                  onPress={toggleCalendar}
+                  disabled={isSaving}
+                >
+                  <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
+                    {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
+                  </Text>
+                  <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
+                </Pressable>
+                <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
+                  <CalendarPicker
+                    selectedDate={selectedDate}
+                    onSelect={handleDaySelect}
+                    theme={theme}
+                  />
+                </AnimatedExpand>
+              </>
+            )}
 
             <Text style={[styles.label, { marginTop: 14 }]}>Horário</Text>
             <Pressable
@@ -866,6 +942,62 @@ function makeModalStyles(theme) {
       marginBottom: 8,
       marginLeft: 4,
       fontFamily: 'System',
+    },
+    presetRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 10,
+    },
+    preset: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+    },
+    presetActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    presetText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    presetTextActive: {
+      color: '#FFFFFF',
+    },
+    pillRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 4,
+    },
+    pill: {
+      minWidth: 46,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+      alignItems: 'center',
+    },
+    pillActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    pillText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    pillTextActive: {
+      color: '#FFFFFF',
     },
     buttons: {
       flexDirection: 'row',

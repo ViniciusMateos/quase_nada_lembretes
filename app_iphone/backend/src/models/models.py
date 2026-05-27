@@ -18,6 +18,7 @@ class User(Base):
     reminders = relationship("Reminder", back_populates="user", cascade="all, delete-orphan")
     chat_history = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    push_tokens = relationship("PushToken", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (Index("idx_users_email", "email"),)
 
@@ -33,6 +34,9 @@ class Reminder(Base):
     interval_seconds = Column(Integer, nullable=True)
     recurrence = Column(String, nullable=True)
     recurrence_str = Column(String, nullable=True)
+    # CSV de inteiros (convenção weekday(): Seg=0..Dom=6) p/ recurrence="weekly_days".
+    # Ex.: "0,1,2,3,4" = segunda a sexta. NULL para os demais tipos.
+    days_of_week = Column(String, nullable=True)
     end_date = Column(String, nullable=True)
     is_active = Column(Integer, nullable=False, default=1)
     created_at = Column(String, nullable=False)
@@ -64,6 +68,22 @@ class ChatHistory(Base):
         Index("idx_chat_history_user_id", "user_id"),
         Index("idx_chat_history_user_created", "user_id", "created_at"),
     )
+
+
+class PushToken(Base):
+    """Token de push por dispositivo/usuário. Scaffolding — envio é fase 2."""
+    __tablename__ = "push_tokens"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String, nullable=False, unique=True)
+    platform = Column(String, nullable=True)  # 'ios' | 'android'
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+    user = relationship("User", back_populates="push_tokens")
+
+    __table_args__ = (Index("idx_push_tokens_user_id", "user_id"),)
 
 
 class RefreshToken(Base):

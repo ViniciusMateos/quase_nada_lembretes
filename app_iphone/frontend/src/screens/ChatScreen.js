@@ -14,9 +14,12 @@ import {
   PanResponder,
   Dimensions,
 } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { sendMessage } from '../api/messages.api';
-import { deleteReminder, syncReminders } from '../api/reminders.api';
+import { deleteReminder, syncReminders, listReminders } from '../api/reminders.api';
 import { requestPermission, scheduleFromSync } from '../services/notifications';
+import { enqueueMessage, drainQueue } from '../services/messageQueue';
+import { detectIs12h } from '../utils/timeFormat';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import MessageBubble from '../components/MessageBubble';
@@ -107,6 +110,7 @@ export default function ChatScreen({ navigation }) {
   const [flyingMessage, setFlyingMessage] = useState('');
   const [showAmbiguousModal, setShowAmbiguousModal] = useState(false);
   const [ambiguousCandidates, setAmbiguousCandidates] = useState([]);
+  const [clarifyOptions, setClarifyOptions] = useState([]);
   const [hasNotifPermission, setHasNotifPermission] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const canSend = inputText.trim().length > 0 && !isLoading;
@@ -133,6 +137,31 @@ export default function ChatScreen({ navigation }) {
       console.warn('[ChatScreen] Erro ao sincronizar:', error);
     }
   }, []);
+
+  // Validação real: confere se o lembrete que a IA disse ter criado realmente
+  // está na lista. Evita o falso "criado" quando a linha não persiste/lista.
+  const confirmReminderCreated = useCallback(
+    async reminder => {
+      if (!reminder?.id) return;
+      try {
+        const data = await listReminders();
+        const exists = (data?.reminders || []).some(r => r.id === reminder.id);
+        if (!exists) {
+          addMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: 'Não consegui confirmar esse lembrete na sua lista. Pode tentar de novo?',
+            timestamp: new Date().toISOString(),
+            action: null,
+            isError: true,
+          });
+        }
+      } catch (error) {
+        console.warn('[ChatScreen] Erro ao confirmar criação do lembrete:', error);
+      }
+    },
+    [addMessage],
+  );
 
   useEffect(() => {
     setShowInitialTyping(true);
@@ -165,6 +194,32 @@ export default function ChatScreen({ navigation }) {
     return () => { isMounted = false; };
   }, [handleSync]);
 
+  // Drena a fila offline: ao reenviar com sucesso, mostra o resultado no chat
+  // com uma nota breve de que a mensagem estava na fila por falta de conexão.
+  const drainOfflineQueue = useCallback(async () => {
+    await drainQueue(async (item, result) => {
+      addMessage({
+        id: result.message_id || generateId(),
+        role: 'assistant',
+        content: `${result.response}\n\n⏳ enviado da fila (você estava sem conexão)`,
+        timestamp: new Date().toISOString(),
+        action: result.action || null,
+      });
+      const t = result.action?.type;
+      if (t === 'reminder_created' || t === 'reminder_updated' || t === 'reminder_deleted') {
+        await handleSync();
+      }
+    });
+  }, [addMessage, handleSync]);
+
+  // Reenvia a fila quando a conexão volta.
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) drainOfflineQueue();
+    });
+    return () => unsubscribe();
+  }, [drainOfflineQueue]);
+
   useEffect(() => {
     Animated.timing(sendButtonAnim, {
       toValue: canSend ? 1 : 0,
@@ -173,12 +228,16 @@ export default function ChatScreen({ navigation }) {
     }).start();
   }, [canSend, sendButtonAnim]);
 
-  const handleSend = async () => {
-    const content = inputText.trim();
+  const handleSend = async overrideContent => {
+    const useOverride = typeof overrideContent === 'string';
+    const content = (useOverride ? overrideContent : inputText).trim();
     if (!content || isLoading) return;
 
-    setInputText('');
-    inputRef.current?.clear();
+    setClarifyOptions([]);
+    if (!useOverride) {
+      setInputText('');
+      inputRef.current?.clear();
+    }
 
     const now = new Date();
     const offsetMin = -now.getTimezoneOffset();
@@ -233,8 +292,21 @@ export default function ChatScreen({ navigation }) {
       playReceiveSound();
 
       const actionType = result.action?.type;
-      if (actionType === 'reminder_created' || actionType === 'reminder_deleted') {
+      // Qualquer mudança no conjunto de lembretes precisa re-sincronizar as
+      // notificações locais. 'reminder_updated' estava de fora → ao editar pelo
+      // chat, as notificações antigas não eram canceladas e o horário antigo
+      // continuava disparando junto com o novo.
+      if (
+        actionType === 'reminder_created' ||
+        actionType === 'reminder_updated' ||
+        actionType === 'reminder_deleted'
+      ) {
         await handleSync();
+        if (actionType === 'reminder_created') {
+          await confirmReminderCreated(result.action.reminder);
+        }
+      } else if (actionType === 'needs_time_clarification') {
+        setClarifyOptions(result.action.options || []);
       } else if (actionType === 'ambiguous') {
         setAmbiguousCandidates(result.action.candidates || []);
         setShowAmbiguousModal(true);
@@ -245,20 +317,21 @@ export default function ChatScreen({ navigation }) {
       const isNetworkError = !error?.response;
 
       if (isNetworkError) {
-        try {
-          const syncData = await syncReminders();
-          await scheduleFromSync(syncData);
-          // sync silencioso — lista atualiza ao ganhar foco
-        } catch {
-          addMessage({
-            id: generateId(),
-            role: 'assistant',
-            content: 'Não consegui me conectar ao servidor.\nTente novamente.',
-            timestamp: new Date().toISOString(),
-            action: null,
-            isError: true,
-          });
-        }
+        // Sem conexão / queda no meio da requisição → enfileira para reenviar
+        // automaticamente quando a internet voltar.
+        enqueueMessage({
+          content,
+          client_timestamp: userMessage.timestamp,
+          hour_format: detectIs12h() ? '12h' : '24h',
+        });
+        addMessage({
+          id: generateId(),
+          role: 'assistant',
+          content: 'Sem conexão agora 📡\nVou enviar assim que a internet voltar.',
+          timestamp: new Date().toISOString(),
+          action: null,
+          isError: true,
+        });
       } else {
         const errCode = error?.code?.toUpperCase() || '';
         const errStatus = error?.response?.status;
@@ -358,6 +431,22 @@ export default function ChatScreen({ navigation }) {
           ListFooterComponent={showInitialTyping || showTyping ? <TypingIndicator /> : null}
         />
 
+        {clarifyOptions.length > 0 ? (
+          <View style={styles.clarifyRow}>
+            {clarifyOptions.map((opt, i) => (
+              <PressableScale
+                key={i}
+                style={styles.clarifyChip}
+                onPress={() => handleSend(opt.resend)}
+                accessibilityRole="button"
+                accessibilityLabel={opt.label}
+              >
+                <Text style={styles.clarifyChipText}>{opt.label}</Text>
+              </PressableScale>
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.inputContainer}>
           <TextInput
             ref={inputRef}
@@ -370,7 +459,7 @@ export default function ChatScreen({ navigation }) {
             maxLength={1000}
             returnKeyType="send"
             enablesReturnKeyAutomatically
-            onSubmitEditing={handleSend}
+            onSubmitEditing={() => handleSend()}
             editable={!isLoading}
             onFocus={() => { isInputFocusedRef.current = true; }}
             onBlur={() => { isInputFocusedRef.current = false; }}
@@ -387,7 +476,7 @@ export default function ChatScreen({ navigation }) {
                 }),
               },
             ]}
-            onPress={handleSend}
+            onPress={() => handleSend()}
             disabled={!canSend}
             activeOpacity={0.75}
             accessibilityRole="button"
@@ -481,6 +570,27 @@ function makeStyles(theme) {
     headerLogo: {
       width: 30,
       height: 30,
+    },
+    clarifyRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingBottom: 8,
+    },
+    clarifyChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.primary,
+      backgroundColor: theme.surface,
+    },
+    clarifyChipText: {
+      color: theme.primary,
+      fontSize: 14,
+      fontWeight: '600',
+      fontFamily: 'System',
     },
     inputContainer: {
       flexDirection: 'row',

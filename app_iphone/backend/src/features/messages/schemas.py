@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class MessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=2000)
     client_timestamp: str = Field(..., description="ISO 8601 timestamp from client")
+    hour_format: str = Field(default="24h", description="'12h' (AM/PM) ou '24h' — formato de hora do usuário")
 
     @field_validator("content")
     @classmethod
