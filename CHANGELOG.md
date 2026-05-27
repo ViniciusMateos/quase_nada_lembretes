@@ -11,6 +11,21 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.1.0] - 2026-05-26
+
+### Added
+- Recorrência por dias da semana (`weekly_days`): lembretes em vários dias ou em faixas — "de segunda a sexta", "terça e quinta", "dias úteis", "fim de semana" — interpretados pela IA e agendados em todos os dias do conjunto (nova coluna `days_of_week` com migração idempotente).
+- Esclarecimento de horário no formato 12h: quando o horário é ambíguo (ex: "às 9h" sem manhã/noite), a IA pergunta se é de manhã ou à noite antes de criar o lembrete; o app envia o `hour_format` do usuário.
+- Scaffolding de push notifications: tabela `push_tokens`, endpoint `POST /push/register` e telas/serviços de notificação no app (o envio de push fica para a fase 2).
+- Endpoint `POST /reminders` para criar lembretes diretamente (usado pelo "adiar" de lembretes pontuais).
+- Suíte de QA (testes de ponta a ponta da API) e script de auditoria de lembretes no banco.
+
+### Changed
+- Bot do Telegram reescrito como cliente do backend FastAPI: passa a usar a mesma IA, a mesma lógica de recorrência (incl. dias da semana) e o mesmo banco do app, em vez de IA, banco e agendamento próprios. Dependências enxugadas (remove `google-generativeai`, `sqlalchemy` e `number-parser`; adiciona `httpx`).
+- Listagem de lembretes com `limit` alto para casar a aba com o `/sync`, corrigindo o caso "dispara mas não aparece na lista".
+
+---
+
 ## [1.0.0] - 2026-05-08
 
 Primeira versão estável do **Quase Nada Lembretes** para iOS.
