@@ -460,7 +460,6 @@ export default function ChatScreen({ navigation }) {
             returnKeyType="send"
             enablesReturnKeyAutomatically
             onSubmitEditing={() => handleSend()}
-            editable={!isLoading}
             onFocus={() => { isInputFocusedRef.current = true; }}
             onBlur={() => { isInputFocusedRef.current = false; }}
             contextMenuHidden={false}
