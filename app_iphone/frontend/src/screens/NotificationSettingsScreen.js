@@ -15,7 +15,7 @@ import PressableScale from '../components/PressableScale';
 
 export default function NotificationSettingsScreen({ navigation }) {
   const { theme } = useTheme();
-  const { priority, customSound, togglePriority, toggleCustomSound } = useNotificationSettings();
+  const { priority, togglePriority } = useNotificationSettings();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   return (
@@ -40,23 +40,6 @@ export default function NotificationSettingsScreen({ navigation }) {
             <Switch
               value={priority}
               onValueChange={togglePriority}
-              trackColor={{ true: theme.primary, false: theme.border }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Som personalizado</Text>
-              <Text style={styles.rowDesc}>
-                Toca o som do app em vez do som padrão de notificação do sistema.
-              </Text>
-            </View>
-            <Switch
-              value={customSound}
-              onValueChange={toggleCustomSound}
               trackColor={{ true: theme.primary, false: theme.border }}
               thumbColor="#FFFFFF"
             />

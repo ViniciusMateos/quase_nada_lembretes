@@ -1,5 +1,5 @@
 import notifee, { TriggerType, AndroidImportance, EventType } from '@notifee/react-native';
-import { getPriorityEnabled, getCustomSoundEnabled } from './notificationSettings';
+import { getPriorityEnabled } from './notificationSettings';
 import { createReminder } from '../api/reminders.api';
 
 const CHANNEL_ID = 'quase-nada-lembretes';
@@ -16,12 +16,14 @@ const ANDROID_SOUND = 'sound_reminder';
 
 const SNOOZE_PREFIX = 'snooze_';
 
+// Som do app SEMPRE — nunca o som padrão do sistema (decisão de produto:
+// o lembrete sempre toca a voz/efeito do Quase Nada, sem opção de desligar).
 function iosSound() {
-  return getCustomSoundEnabled() ? IOS_SOUND : 'default';
+  return IOS_SOUND;
 }
 
 function androidSound() {
-  return getCustomSoundEnabled() ? ANDROID_SOUND : 'default';
+  return ANDROID_SOUND;
 }
 
 async function ensureChannel() {
