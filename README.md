@@ -401,6 +401,27 @@ Cria um lembrete sem passar pela IA (usado, por exemplo, pelo "adiar" de lembret
 
 ---
 
+#### `PATCH /reminders/{id}` — Editar lembrete
+
+Edita título, horário e/ou recorrência. Permite tornar um lembrete pontual em recorrente, trocar o tipo de recorrência ou remover a recorrência (enviando `recurrence: "once"`). A próxima execução é recalculada **em horário de Brasília** (dispara hoje se o horário ainda não passou e o dia é válido; senão vai pra próxima ocorrência).
+
+**Request (todos os campos opcionais — só o que vier é alterado):**
+```json
+{
+  "title": "Bater ponto",
+  "scheduled_time": "2026-04-27T09:00:00-03:00",
+  "recurrence": "weekly_days",
+  "days_of_week": [0, 1, 2, 3, 4],
+  "interval_seconds": null
+}
+```
+
+`recurrence` aceita os mesmos valores do `POST`. Para `weekly_days`, informe `days_of_week`; para `interval_seconds`, informe `interval_seconds`.
+
+**Response 200:** o lembrete atualizado (mesmo formato do item de `GET /reminders`).
+
+---
+
 #### `DELETE /reminders/{id}` — Deletar lembrete
 
 **Response 200:**
@@ -651,10 +672,12 @@ quase_nada_lembretes/
         ├── app.config.js      # Configuração Expo
         ├── eas.json           # Configuração EAS Build
         └── src/
-            ├── api/           # Chamadas HTTP para o backend
-            ├── components/    # Componentes reutilizáveis
-            ├── context/       # AuthContext, NotificationSettingsContext
+            ├── api/           # Chamadas HTTP para o backend (client com refresh)
+            ├── components/    # Componentes reutilizáveis (PressableScale, CalendarPicker, ...)
+            ├── context/       # AuthContext, NotificationSettingsContext, ThemeContext
+            ├── lib/           # storage MMKV (instância única, sem ciclo de import)
             ├── navigation/    # AppNavigator (rotas)
-            ├── screens/       # Chat, Login, Register, NotificationSettings
-            └── services/      # Notificações, fila de mensagens e tarefas em background
+            ├── screens/       # Chat, Lembretes, Login, Register, NotificationSettings
+            ├── services/      # Notificações, fila de mensagens e tarefas em background
+            └── utils/         # Formatação de hora (12h/24h)
 ```
