@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { storage } from '../context/AuthContext';
+import { storage } from '../lib/storage';
 
 export const navigationRef = { current: null };
 const API_BASE_URL = process.env.API_BASE_URL;
