@@ -16,6 +16,7 @@ from src.features.reminders.repository import (
     search_reminders_by_title,
 )
 from src.features.reminders.schemas import (
+    ReminderCreate,
     ReminderDeleteResponse,
     ReminderListResponse,
     ReminderOut,
@@ -25,9 +26,158 @@ from src.features.reminders.schemas import (
 )
 from src.models.models import Reminder
 
+# Fuso de Brasília fixo (UTC-3). O Brasil não usa horário de verão desde 2019,
+# então o offset fixo é correto e dispensa tzdata no servidor. TODO cálculo de
+# "dia da semana" e "a hora já passou hoje?" precisa ser feito neste fuso —
+# fazer em UTC desloca o dia quando o horário cruza a meia-noite UTC (era por
+# isso que "seg a sex" começava na terça).
+BRT = timezone(timedelta(hours=-3))
+
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
+
+
+_DIAS_ABREV = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+
+def _today_at_time(base: datetime, now: datetime) -> datetime:
+    """Hoje (no fuso de Brasília) com a hora/minuto de `base`, devolvido em UTC."""
+    base_brt = base.astimezone(BRT)
+    cand_brt = now.astimezone(BRT).replace(
+        hour=base_brt.hour, minute=base_brt.minute, second=0, microsecond=0
+    )
+    return cand_brt.astimezone(timezone.utc)
+
+
+def _align_first_occurrence(
+    recurrence: str | None,
+    base: datetime,
+    days: list[int],
+    interval_seconds: int | None,
+    now: datetime,
+) -> datetime:
+    """
+    Primeira execução FUTURA de um lembrete, calculada no fuso de Brasília.
+
+    `base` carrega o horário desejado (hora/minuto). A regra geral: se o horário
+    de hoje ainda não passou e o dia é válido, dispara HOJE; senão avança para a
+    próxima ocorrência válida. Cobre todos os tipos de recorrência.
+    """
+    if not recurrence or recurrence == "once":
+        nxt = base
+        while nxt <= now:
+            nxt += timedelta(days=1)
+        return nxt
+
+    if recurrence == "weekly_days":
+        ds = set(days or [])
+        if not ds:
+            return base
+        cand = _today_at_time(base, now)
+        for _ in range(8):
+            if cand > now and cand.astimezone(BRT).weekday() in ds:
+                return cand
+            cand += timedelta(days=1)
+        return cand
+
+    if recurrence == "daily":
+        cand = _today_at_time(base, now)
+        if cand <= now:
+            cand += timedelta(days=1)
+        return cand
+
+    if recurrence == "interval_seconds":
+        step = interval_seconds or 0
+        if step <= 0:
+            return base
+        nxt = base
+        while nxt <= now:
+            nxt += timedelta(seconds=step)
+        return nxt
+
+    if recurrence == "weekly":
+        nxt = base
+        while nxt <= now:
+            nxt += timedelta(weeks=1)
+        return nxt
+
+    if recurrence in ("monthly", "day_of_month"):
+        nxt = base
+        while nxt <= now:
+            nxt += timedelta(days=30)
+        return nxt
+
+    return base
+
+
+def _parse_days(value) -> list[int]:
+    """Aceita lista de ints/strings ou CSV ('0,1,2') → lista ordenada de ints 0..6."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip() != ""]
+    elif isinstance(value, (list, tuple)):
+        parts = value
+    else:
+        return []
+    out: set[int] = set()
+    for p in parts:
+        try:
+            n = int(p)
+        except (ValueError, TypeError):
+            continue
+        if 0 <= n <= 6:
+            out.add(n)
+    return sorted(out)
+
+
+def _weekly_days_label(days: list[int]) -> str:
+    """Rótulo legível em PT-BR para um conjunto de dias da semana."""
+    s = set(days)
+    if not s:
+        return "Dias da semana"
+    if s == {0, 1, 2, 3, 4}:
+        return "Dias úteis"
+    if s == {5, 6}:
+        return "Fim de semana"
+    if len(s) == 7:
+        return "Todos os dias"
+    ordered = sorted(s)
+    # contíguo? -> "Seg–Sex"
+    if len(ordered) >= 3 and ordered == list(range(ordered[0], ordered[-1] + 1)):
+        return f"{_DIAS_ABREV[ordered[0]]}–{_DIAS_ABREV[ordered[-1]]}"
+    return ", ".join(_DIAS_ABREV[d] for d in ordered)
+
+
+def _interval_label(seconds: int | None) -> str:
+    if not seconds:
+        return "Intervalo"
+    if seconds % 86400 == 0:
+        d = seconds // 86400
+        return f"A cada {d} dia{'s' if d > 1 else ''}"
+    if seconds % 3600 == 0:
+        h = seconds // 3600
+        return f"A cada {h}h"
+    if seconds % 60 == 0:
+        m = seconds // 60
+        return f"A cada {m}min"
+    return f"A cada {seconds}s"
+
+
+def _recurrence_label(
+    recurrence: str | None, days: list[int], interval_seconds: int | None
+) -> str:
+    mapping = {
+        "once": "Único",
+        "daily": "Diariamente",
+        "weekly": "Semanalmente",
+        "monthly": "Mensalmente",
+        "day_of_month": "Todo mês neste dia",
+        "interval_seconds": _interval_label(interval_seconds),
+        "weekly_days": _weekly_days_label(days),
+    }
+    return mapping.get(recurrence or "once", recurrence or "Único")
 
 
 def calcular_proxima_execucao(reminder: Reminder, from_datetime: datetime) -> datetime | None:
@@ -48,6 +198,18 @@ def calcular_proxima_execucao(reminder: Reminder, from_datetime: datetime) -> da
 
     if recurrence == "daily":
         next_dt = from_datetime + timedelta(seconds=86400)
+    elif recurrence == "weekly_days":
+        days = _parse_days(reminder.days_of_week)
+        if not days:
+            return None
+        # próximo dia (após from_datetime) cujo weekday ∈ days, mesma hora/min.
+        # weekday avaliado em BRT — em UTC o dia escorrega quando o horário
+        # cruza a meia-noite UTC.
+        next_dt = from_datetime + timedelta(days=1)
+        for _ in range(7):
+            if next_dt.astimezone(BRT).weekday() in days:
+                break
+            next_dt += timedelta(days=1)
     elif recurrence == "weekly":
         next_dt = from_datetime + timedelta(weeks=1)
     elif recurrence == "monthly":
@@ -188,28 +350,64 @@ async def update_reminder(
             detail={"detail": "Este lembrete não pertence a você.", "code": "NOT_YOUR_REMINDER"},
         )
 
-    now = datetime.now(timezone.utc).isoformat()
-    update_values: dict = {"updated_at": now}
+    now = datetime.now(timezone.utc)
+    update_values: dict = {"updated_at": now.isoformat()}
 
     if data.title is not None:
         update_values["title"] = data.title
         update_values["title_normalized"] = _normalize(data.title)
 
+    # Horário base: scheduled_time enviado nesta edição, senão o next_execution atual.
     if data.scheduled_time is not None:
         try:
-            parsed = datetime.fromisoformat(data.scheduled_time)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            else:
-                parsed = parsed.astimezone(timezone.utc)
-            update_values["next_execution"] = parsed.isoformat()
-            if reminder.recurrence == "once":
-                update_values["is_active"] = 1
+            base = datetime.fromisoformat(data.scheduled_time)
+            base = base.replace(tzinfo=timezone.utc) if base.tzinfo is None else base.astimezone(timezone.utc)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"detail": "Formato de data inválido. Use ISO 8601.", "code": "INVALID_DATE"},
             )
+    else:
+        base = datetime.fromisoformat(reminder.next_execution)
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=timezone.utc)
+
+    # Recorrência final = o que veio na edição, senão o estado atual. Permite:
+    #   - tornar recorrente: recurrence="weekly_days"/"daily"/etc (+ days/interval)
+    #   - remover recorrência: recurrence="once" (limpa dias/intervalo, vira pontual)
+    #   - só mudar horário/dias: mantém o tipo atual e recalcula
+    recurrence = data.recurrence if data.recurrence is not None else (reminder.recurrence or "once")
+    days = _parse_days(data.days_of_week) if data.days_of_week is not None else _parse_days(reminder.days_of_week)
+    interval = data.interval_seconds if data.interval_seconds is not None else reminder.interval_seconds
+
+    if recurrence == "weekly_days" and not days:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"detail": "Selecione ao menos um dia da semana.", "code": "NO_DAYS"},
+        )
+    if recurrence == "interval_seconds" and not interval:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"detail": "Informe o intervalo da recorrência.", "code": "NO_INTERVAL"},
+        )
+
+    # Recalcula o agendamento sempre que algo que o afeta muda.
+    schedule_changed = (
+        data.scheduled_time is not None
+        or data.recurrence is not None
+        or data.days_of_week is not None
+        or data.interval_seconds is not None
+    )
+    if schedule_changed:
+        next_exec = _align_first_occurrence(recurrence, base, days, interval, now)
+        update_values["recurrence"] = recurrence
+        update_values["recurrence_str"] = _recurrence_label(recurrence, days, interval)
+        update_values["days_of_week"] = (
+            ",".join(str(d) for d in days) if recurrence == "weekly_days" and days else None
+        )
+        update_values["interval_seconds"] = interval if recurrence == "interval_seconds" else None
+        update_values["next_execution"] = next_exec.isoformat()
+        update_values["is_active"] = 1
 
     await db.execute(
         update(Reminder)
@@ -250,6 +448,7 @@ async def sync_reminders(
         ScheduledExecution(
             id=r.id,
             title=r.title,
+            recurrence=r.recurrence,
             recurrence_str=r.recurrence_str,
             is_active=bool(r.is_active),
             scheduled_executions=calcular_execucoes_futuras(r, horizon_days, max_per_reminder),
@@ -287,30 +486,10 @@ async def create_reminder_from_data(
     interval_seconds = dados.get("interval_seconds")
     end_date_raw = dados.get("data_fim")
     titulo = dados.get("titulo", "Sem título")
+    days = _parse_days(dados.get("days_of_week"))
+    days_csv = ",".join(str(d) for d in days) if days else None
 
-    def _interval_str(seconds: int | None) -> str:
-        if not seconds:
-            return "Intervalo"
-        if seconds % 86400 == 0:
-            days = seconds // 86400
-            return f"A cada {days} dia{'s' if days > 1 else ''}"
-        if seconds % 3600 == 0:
-            hours = seconds // 3600
-            return f"A cada {hours}h"
-        if seconds % 60 == 0:
-            mins = seconds // 60
-            return f"A cada {mins}min"
-        return f"A cada {seconds}s"
-
-    recurrence_map = {
-        "once": "Único",
-        "daily": "Diariamente",
-        "weekly": "Semanalmente",
-        "monthly": "Mensalmente",
-        "day_of_month": "Todo mês neste dia",
-        "interval_seconds": _interval_str(interval_seconds),
-    }
-    recurrence_str = recurrence_map.get(recurrence, recurrence)
+    recurrence_str = _recurrence_label(recurrence, days, interval_seconds)
 
     reminder = Reminder(
         id=str(uuid.uuid4()),
@@ -321,12 +500,41 @@ async def create_reminder_from_data(
         interval_seconds=interval_seconds,
         recurrence=recurrence,
         recurrence_str=recurrence_str,
+        days_of_week=days_csv,
         end_date=end_date_raw,
         is_active=1,
         created_at=now_iso,
         updated_at=now_iso,
     )
+
+    # Alinha a 1ª execução à próxima ocorrência futura no fuso de Brasília
+    # (hoje se a hora ainda não passou e o dia é válido; senão avança). Cobre
+    # todos os tipos, incluindo o caso comum de só um horário que já passou hoje.
+    next_exec = _align_first_occurrence(
+        recurrence, next_exec, days, interval_seconds, now
+    )
+    reminder.next_execution = next_exec.isoformat()
+
     return await create_reminder(db, reminder)
+
+
+async def create_reminder_api(
+    db: AsyncSession,
+    user_id: str,
+    data: "ReminderCreate",
+) -> ReminderOut:
+    """Criação direta de lembrete (usado pelo adiar de pontuais e por integrações)."""
+    dados: dict[str, Any] = {
+        "titulo": data.title,
+        "data_hora": data.scheduled_time,
+        "recorrencia": data.recurrence or "once",
+    }
+    if data.days_of_week:
+        dados["days_of_week"] = data.days_of_week
+    reminder = await create_reminder_from_data(db, user_id, dados)
+    await db.commit()
+    fresh = await get_reminder_by_id(db, reminder.id)
+    return ReminderOut.from_orm(fresh)
 
 
 async def find_reminders_for_deletion(

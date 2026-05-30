@@ -70,17 +70,26 @@ Para CRIAR_LEMBRETE, extraia:
 - recorrencia: OBRIGATÓRIO — escolha UMA das opções abaixo com muito cuidado:
   * "once" — evento ÚNICO, acontece UMA SÓ VEZ. Use quando: usuário mencionar data/hora específica sem padrão de repetição, ou usar "daqui X minutos/horas", ou usar "hoje", "amanhã", "na próxima semana" sem repetição.
   * "daily" — repete TODO DIA. Use SOMENTE quando o usuário disser explicitamente: "todo dia", "todos os dias", "diariamente", "cada dia".
-  * "weekly" — repete toda semana em um dia específico. Use SOMENTE quando disser: "toda segunda", "toda terça", "toda quinta", "semanalmente na quarta", etc.
+  * "weekly" — repete toda semana em UM ÚNICO dia específico. Use SOMENTE quando disser um dia só: "toda segunda", "toda terça", "toda quinta", "semanalmente na quarta".
+  * "weekly_days" — repete em VÁRIOS dias específicos da semana, ou em uma FAIXA de dias. Use quando o usuário listar mais de um dia ou uma faixa: "de segunda a sexta", "toda terça e quinta", "seg, qua e sex", "dias úteis", "todo fim de semana", "nos dias de semana".
   * "monthly" — repete todo mês na mesma data. Use SOMENTE quando disser: "todo mês", "mensalmente", "todo dia 10", "todo primeiro do mês".
   * "day_of_month" — repete todo mês em um dia específico do mês. Use SOMENTE quando especificar dia do mês com repetição mensal.
   * "interval_seconds" — repete em intervalos fixos de segundos. Use SOMENTE quando disser: "a cada X horas", "a cada X minutos", "a cada 2 dias".
 - interval_seconds: número inteiro de segundos (APENAS quando recorrencia="interval_seconds"). Exemplos: "a cada 4 horas" = 14400, "a cada 30 minutos" = 1800, "a cada 2 dias" = 172800. Para outros tipos: null.
+- days_of_week: lista de inteiros dos dias (Seg=0, Ter=1, Qua=2, Qui=3, Sex=4, Sáb=5, Dom=6). OBRIGATÓRIO quando recorrencia="weekly_days". Exemplos: "segunda a sexta"/"dias úteis" = [0,1,2,3,4]; "terça e quinta" = [1,3]; "fim de semana" = [5,6]; "seg, qua e sex" = [0,2,4]; "todo dia" NÃO é weekly_days (use "daily"). Para outros tipos: null.
+- precisa_ampm: true SOMENTE se o "Formato de hora do usuário" for "12h" E o horário mencionado tiver hora de 1 a 12 SEM indicação de manhã/tarde/noite/AM/PM (ex: "às 9h", "às 7", "8 e meia"). Se o usuário disser "9 da manhã", "9 da noite", "21h", "meio-dia", "meia-noite", ou o formato for "24h" → precisa_ampm = false. Quando true, ainda preencha data_hora com seu melhor palpite (manhã).
+- hora_ambigua: quando precisa_ampm=true, a hora no formato "H:MM" (ex: "9:00"). Senão null.
 - data_fim: data de término ISO 8601 com offset (se mencionado, senão null)
 
 REGRA CRÍTICA SOBRE RECORRÊNCIA:
 - Se a mensagem contém uma data/hora específica SEM palavras de repetição → recorrencia = "once"
 - Palavras que NUNCA indicam recorrência: "daqui", "em X minutos", "em X horas", "hoje", "amanhã", "semana que vem", "mês que vem", "no dia X"
 - Palavras que SÓ indicam recorrência: "todo", "toda", "todos", "todas", "cada", "diariamente", "semanalmente", "mensalmente"
+- Faixas/listas de dias ("de segunda a sexta", "terça e quinta", "dias úteis", "fim de semana") → SEMPRE recorrencia = "weekly_days" com days_of_week preenchido. NUNCA use "weekly" para mais de um dia.
+
+REGRA CRÍTICA SOBRE HORÁRIO FUTURO:
+- A data_hora deve ser SEMPRE no futuro. Se mencionarem só um horário (sem dia) e ele já passou hoje, use o PRÓXIMO dia (amanhã) nesse horário.
+- Para "weekly_days", a data_hora deve ser o PRÓXIMO dia válido do conjunto (hoje, se a hora ainda não passou), no horário pedido.
 
 Para DELETAR_LEMBRETE, extraia:
 - titulo_busca: texto para buscar o lembrete a deletar
@@ -101,6 +110,15 @@ Mensagem: "me lembra de tomar remédio todo dia às 8h"
 
 Mensagem: "me lembra de ligar pra mãe toda quinta"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Ligar pra mãe", "data_hora": "2026-04-30T09:00:00-03:00", "recorrencia": "weekly", "interval_seconds": null, "data_fim": null}}}}
+
+Mensagem: "me lembra de bater ponto de segunda a sexta às 9h"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Bater ponto", "data_hora": "2026-04-27T09:00:00-03:00", "recorrencia": "weekly_days", "interval_seconds": null, "days_of_week": [0, 1, 2, 3, 4], "data_fim": null}}}}
+
+Mensagem: "me lembra de academia terça e quinta às 18h"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Academia", "data_hora": "2026-04-28T18:00:00-03:00", "recorrencia": "weekly_days", "interval_seconds": null, "days_of_week": [1, 3], "data_fim": null}}}}
+
+Mensagem: "me lembra de descansar todo fim de semana às 10h"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Descansar", "data_hora": "2026-04-25T10:00:00-03:00", "recorrencia": "weekly_days", "interval_seconds": null, "days_of_week": [5, 6], "data_fim": null}}}}
 
 Mensagem: "me lembra de pagar o aluguel todo mês dia 5"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Pagar aluguel", "data_hora": "2026-05-05T09:00:00-03:00", "recorrencia": "day_of_month", "interval_seconds": null, "data_fim": null}}}}
@@ -144,13 +162,15 @@ Mensagem: "altera o lembrete de academia para às 19h"
 
 # Sufixo dinâmico — apenas as variáveis que mudam por requisição
 _INTENT_PROMPT_SUFFIX = """Data/hora atual do cliente: {current_datetime}
+Formato de hora do usuário: {hour_format}
 Mensagem do usuário: {user_message}
 
 Responda SOMENTE com JSON válido. Nunca coloque instruções como "CALCULE:" no JSON — apenas o valor ISO 8601 calculado."""
 
-def _build_intent_prompt(user_message: str, current_datetime: str) -> str:
+def _build_intent_prompt(user_message: str, current_datetime: str, hour_format: str) -> str:
     return _INTENT_PROMPT_PREFIX + _INTENT_PROMPT_SUFFIX.format(
         current_datetime=current_datetime,
+        hour_format=hour_format,
         user_message=user_message,
     )
 
@@ -174,6 +194,7 @@ def _available_models() -> list[str]:
 async def classify_intent(
     user_message: str,
     current_datetime: str,
+    hour_format: str = "24h",
 ) -> dict[str, Any]:
     """
     Classify the intent of a user message and extract relevant data.
@@ -181,7 +202,7 @@ async def classify_intent(
     Falls back through MODELOS_PREFERIDOS on 429/404 errors; quota-exceeded
     models are skipped for 1 hour before being retried.
     """
-    prompt = _build_intent_prompt(user_message, current_datetime)
+    prompt = _build_intent_prompt(user_message, current_datetime, hour_format)
 
     last_error: Exception | None = None
 

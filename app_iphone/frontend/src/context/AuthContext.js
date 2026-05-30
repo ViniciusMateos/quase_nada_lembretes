@@ -5,11 +5,11 @@
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { MMKV } from 'react-native-mmkv';
 import { registerLogout, registerUpdateTokens } from '../api/client';
+import { storage } from '../lib/storage';
 
-// Instância de storage persistente (importada também pelo client.js)
-export const storage = new MMKV();
+// Re-exporta pra compatibilidade com quem importava `storage` daqui.
+export { storage };
 
 const AuthContext = createContext(null);
 

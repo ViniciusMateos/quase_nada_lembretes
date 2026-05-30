@@ -41,6 +41,11 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
     setTimeout(() => navigation.navigate('Account'), 220);
   };
 
+  const goToNotifications = () => {
+    close();
+    setTimeout(() => navigation.navigate('NotificationSettings'), 220);
+  };
+
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <View style={styles.overlay}>
@@ -80,6 +85,15 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
                 ]}
               />
             </View>
+          </PressableScale>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <PressableScale style={styles.row} onPress={goToNotifications}>
+            <View style={styles.rowLeft}>
+              <Text style={[styles.rowText, { color: theme.textPrimary }]}>Notificações</Text>
+            </View>
+            <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
           </PressableScale>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />

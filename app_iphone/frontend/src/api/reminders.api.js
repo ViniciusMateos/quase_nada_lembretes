@@ -10,7 +10,21 @@ import apiClient from './client';
  * @returns {Promise<{ reminders: Array<object>, total: number }>}
  */
 export async function listReminders() {
-  const response = await apiClient.get('/api/v1/reminders');
+  // limit alto p/ trazer TODOS os lembretes ativos — mantém a aba consistente
+  // com o /sync (que agenda todos), evitando "dispara mas não aparece na lista".
+  const response = await apiClient.get('/api/v1/reminders', {
+    params: { active_only: true, limit: 500, offset: 0 },
+  });
+  return response.data;
+}
+
+/**
+ * Cria um lembrete diretamente (usado pelo "adiar" de lembretes pontuais).
+ * @param {{ title: string, scheduled_time: string, recurrence?: string }} data
+ * @returns {Promise<object>} lembrete criado
+ */
+export async function createReminder(data) {
+  const response = await apiClient.post('/api/v1/reminders', data);
   return response.data;
 }
 

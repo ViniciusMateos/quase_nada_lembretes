@@ -4,6 +4,7 @@
  */
 
 import apiClient from './client';
+import { detectIs12h } from '../utils/timeFormat';
 
 /**
  * Envia mensagem para a IA e recebe resposta com intenção detectada.
@@ -20,6 +21,7 @@ export async function sendMessage({ content, client_timestamp }) {
   const response = await apiClient.post('/api/v1/messages', {
     content,
     client_timestamp,
+    hour_format: detectIs12h() ? '12h' : '24h',
   }, { timeout: 90000 });
   return response.data;
 }

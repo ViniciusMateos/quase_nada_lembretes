@@ -20,6 +20,7 @@ from src.middleware.error_handler import (
 from src.features.auth.router import router as auth_router
 from src.features.messages.router import router as messages_router
 from src.features.reminders.router import router as reminders_router
+from src.features.push.router import router as push_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,8 +80,34 @@ async def _process_due_reminders() -> None:
             logger.exception("Error processing due reminders.")
 
 
+async def _run_migrations() -> None:
+    """Migrações idempotentes leves (sem Alembic). Adiciona colunas faltantes."""
+    from sqlalchemy import text
+    from src.core.database import engine
+
+    async with engine.begin() as conn:
+        result = await conn.execute(text("PRAGMA table_info(reminders)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "days_of_week" not in columns:
+            await conn.execute(text("ALTER TABLE reminders ADD COLUMN days_of_week TEXT"))
+            logger.info("Migração: coluna reminders.days_of_week adicionada.")
+
+        # Scaffolding de push (fase 2) — cria a tabela se ainda não existir.
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS push_tokens ("
+            "id TEXT PRIMARY KEY, "
+            "user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+            "token TEXT NOT NULL UNIQUE, platform TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id)"
+        ))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await _run_migrations()
     scheduler.add_job(
         _process_due_reminders,
         trigger="interval",
@@ -126,6 +153,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(messages_router, prefix=API_PREFIX)
 app.include_router(reminders_router, prefix=API_PREFIX)
+app.include_router(push_router, prefix=API_PREFIX)
 
 
 @app.get("/health", tags=["health"])

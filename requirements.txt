@@ -1,6 +1,4 @@
 python-telegram-bot[job-queue]
-google-generativeai
 python-dotenv
-sqlalchemy
-number-parser
+httpx
 pytz

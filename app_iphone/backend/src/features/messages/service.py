@@ -78,6 +78,7 @@ async def process_message(
         classification = await classify_intent(
             user_message=payload.content,
             current_datetime=payload.client_timestamp,
+            hour_format=payload.hour_format,
         )
     except Exception as e:
         if chat_task and not chat_task.done():
@@ -97,8 +98,23 @@ async def process_message(
     if intent != "CHAT_GERAL" and chat_task and not chat_task.done():
         chat_task.cancel()
 
+    # ── CRIAR_LEMBRETE com horário ambíguo (12h sem AM/PM) → pede esclarecimento ──
+    if intent == "CRIAR_LEMBRETE" and dados.get("precisa_ampm"):
+        hora = (dados.get("hora_ambigua") or "").strip()
+        hora_label = (hora.split(":")[0] + "h") if hora else "esse horário"
+        base = payload.content
+        action = {
+            "type": "needs_time_clarification",
+            "hora": hora,
+            "options": [
+                {"label": f"{hora_label} da manhã", "resend": f"{base} (esclarecendo: é de manhã, AM)"},
+                {"label": f"{hora_label} da noite", "resend": f"{base} (esclarecendo: é da noite, PM)"},
+            ],
+        }
+        response_text = f"Esse horário ({hora_label}) é de manhã ou à noite?"
+
     # ── CRIAR_LEMBRETE ──
-    if intent == "CRIAR_LEMBRETE":
+    elif intent == "CRIAR_LEMBRETE":
         try:
             reminder = await create_reminder_from_data(db, user.id, dados)
             action = {

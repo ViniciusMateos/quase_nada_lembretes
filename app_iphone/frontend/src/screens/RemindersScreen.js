@@ -12,6 +12,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Keyboard,
+  LayoutAnimation,
   Platform,
   PanResponder,
   Animated,
@@ -47,15 +48,15 @@ function AnimatedExpand({ visible, children, expandedHeight = 400 }) {
       progress.setValue(0);
       Animated.timing(progress, {
         toValue: 1,
-        duration: 260,
+        duration: 360,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: false,
       }).start();
     } else if (mountedRef.current) {
       Animated.timing(progress, {
         toValue: 0,
-        duration: 200,
-        easing: Easing.in(Easing.cubic),
+        duration: 300,
+        easing: Easing.inOut(Easing.cubic),
         useNativeDriver: false,
       }).start(({ finished }) => {
         if (finished) {
@@ -136,15 +137,64 @@ function groupReminders(reminders) {
   return { upcoming, recurring };
 }
 
+// Convenção weekday(): Seg=0 .. Dom=6
+const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const DAY_PRESETS = [
+  { label: 'Dias úteis', days: [0, 1, 2, 3, 4] },
+  { label: 'Fim de semana', days: [5, 6] },
+  { label: 'Todo dia', days: [0, 1, 2, 3, 4, 5, 6] },
+];
+
+// Tipos de recorrência expostos na edição. `key` casa com o backend.
+const RECURRENCE_TYPES = [
+  { key: 'once', label: 'Único' },
+  { key: 'daily', label: 'Todo dia' },
+  { key: 'weekly_days', label: 'Dias da semana' },
+  { key: 'weekly', label: 'Toda semana' },
+  { key: 'monthly', label: 'Todo mês' },
+  { key: 'interval_seconds', label: 'Intervalo' },
+];
+
+// Tipos que precisam de uma data de referência (calendário).
+const TYPES_WITH_DATE = new Set(['once', 'weekly', 'monthly']);
+
+// Tons levemente distintos do laranja de marca (#FF8234) por grupo de
+// controles — cada setor do form ganha identidade em vez de tudo chapado na
+// mesma cor. Convenção: animação + variação de tom dão acabamento.
+const SECTOR_TINTS = {
+  type: '#FF8234',   // tipo de recorrência — laranja principal
+  preset: '#F4663A', // presets (dias úteis/fim de semana) — laranja mais quente
+  day: '#F59E3C',    // dias individuais — laranja mais dourado
+};
+
+function sameDays(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
+function intervalFromSeconds(seconds) {
+  if (!seconds || seconds <= 0) return { value: '1', unit: 'days' };
+  if (seconds % 86400 === 0) return { value: String(seconds / 86400), unit: 'days' };
+  if (seconds % 3600 === 0) return { value: String(seconds / 3600), unit: 'hours' };
+  return { value: String(Math.max(1, Math.round(seconds / 3600))), unit: 'hours' };
+}
+
 function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [title, setTitle] = useState('');
+  const [recurrence, setRecurrence] = useState('once');
   const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDays, setSelectedDays] = useState([]);
   const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
+  const [intervalValue, setIntervalValue] = useState('1');
+  const [intervalUnit, setIntervalUnit] = useState('days');
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const styles = useMemo(() => makeModalStyles(theme), [theme]);
+  const needsDate = TYPES_WITH_DATE.has(recurrence);
 
   const sheetTranslateY = useRef(new Animated.Value(400)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -152,12 +202,15 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
 
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && g.vy > 0,
+      // Sensível: qualquer arrasto pra baixo na barrinha já agarra o sheet.
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 3,
       onPanResponderMove: (_, g) => {
         if (g.dy > 0) sheetTranslateY.setValue(g.dy);
       },
       onPanResponderRelease: (_, g) => {
-        if (g.dy > 80) {
+        // Fecha com arrasto curto (60px) OU com flick pra baixo (velocidade).
+        if (g.dy > 60 || g.vy > 0.5) {
           Keyboard.dismiss();
           keyboardOffset.setValue(0);
           Animated.timing(sheetTranslateY, { toValue: 500, duration: 220, useNativeDriver: true }).start(onClose);
@@ -172,9 +225,14 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   useEffect(() => {
     if (visible && reminder) {
       setTitle(reminder.title);
+      setRecurrence(reminder.recurrence || 'once');
       const d = reminder.next_execution ? new Date(reminder.next_execution) : new Date();
       setSelectedDate(d);
+      setSelectedDays(Array.isArray(reminder.days_of_week) ? reminder.days_of_week : []);
       setPickerTime(isoToPickerTime(reminder.next_execution));
+      const iv = intervalFromSeconds(reminder.interval_seconds);
+      setIntervalValue(iv.value);
+      setIntervalUnit(iv.unit);
       setErrors({});
       setCalendarVisible(false);
       setTimePickerVisible(false);
@@ -224,18 +282,48 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     if (errors.datetime) setErrors(e => ({ ...e, datetime: null }));
   };
 
+  const toggleDay = day => {
+    setSelectedDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day],
+    );
+    if (errors.days) setErrors(e => ({ ...e, days: null }));
+  };
+
   const handleSave = async () => {
     const newErrors = {};
     if (!title.trim()) newErrors.title = 'Título é obrigatório';
-    if (!selectedDate) newErrors.datetime = 'Selecione uma data';
+    if (recurrence === 'weekly_days' && selectedDays.length === 0) {
+      newErrors.days = 'Selecione ao menos um dia';
+    }
+    if (needsDate && !selectedDate) {
+      newErrors.datetime = 'Selecione uma data';
+    }
+    let intervalSeconds = null;
+    if (recurrence === 'interval_seconds') {
+      const n = parseInt(intervalValue, 10);
+      if (!n || n <= 0) newErrors.interval = 'Informe um intervalo válido';
+      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : 3600);
+    }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
     setIsSaving(true);
     try {
-      const finalDate = pickerTimeToDate(selectedDate, pickerTime);
-      await onSave(reminder.id, { title: title.trim(), scheduled_time: finalDate.toISOString() });
+      const baseDate = (needsDate ? selectedDate : new Date()) || new Date();
+      const finalDate = pickerTimeToDate(baseDate, pickerTime);
+      const payload = {
+        title: title.trim(),
+        scheduled_time: finalDate.toISOString(),
+        recurrence,
+      };
+      if (recurrence === 'weekly_days') {
+        payload.days_of_week = [...selectedDays].sort((a, b) => a - b);
+      }
+      if (recurrence === 'interval_seconds') {
+        payload.interval_seconds = intervalSeconds;
+      }
+      await onSave(reminder.id, payload);
     } finally {
       setIsSaving(false);
     }
@@ -269,24 +357,132 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             />
             {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
 
-            <Text style={styles.label}>Data</Text>
-            <Pressable
-              style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
-              onPress={toggleCalendar}
-              disabled={isSaving}
+            <Text style={styles.label}>Recorrência</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.typeRow}
+              keyboardShouldPersistTaps="handled"
             >
-              <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
-                {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
-              </Text>
-              <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
-            </Pressable>
-            <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
-              <CalendarPicker
-                selectedDate={selectedDate}
-                onSelect={handleDaySelect}
-                theme={theme}
-              />
-            </AnimatedExpand>
+              {RECURRENCE_TYPES.map(t => {
+                const active = recurrence === t.key;
+                return (
+                  <PressableScale
+                    key={t.key}
+                    style={[styles.typeChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
+                    onPress={() => {
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                      setRecurrence(t.key);
+                      setCalendarVisible(false);
+                      setErrors(e => ({ ...e, days: null, datetime: null, interval: null }));
+                    }}
+                    disabled={isSaving}
+                  >
+                    <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{t.label}</Text>
+                  </PressableScale>
+                );
+              })}
+            </ScrollView>
+
+            {recurrence === 'weekly_days' && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>Dias da semana</Text>
+                <View style={styles.presetRow}>
+                  {DAY_PRESETS.map(p => {
+                    const active = sameDays(selectedDays, p.days);
+                    return (
+                      <PressableScale
+                        key={p.label}
+                        style={[styles.preset, active && { backgroundColor: SECTOR_TINTS.preset, borderColor: SECTOR_TINTS.preset }]}
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setSelectedDays(p.days);
+                          if (errors.days) setErrors(e => ({ ...e, days: null }));
+                        }}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.presetText, active && styles.presetTextActive]}>{p.label}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                <View style={styles.pillRow}>
+                  {DAY_LABELS.map((lbl, idx) => {
+                    const on = selectedDays.includes(idx);
+                    return (
+                      <PressableScale
+                        key={idx}
+                        style={[styles.pill, on && { backgroundColor: SECTOR_TINTS.day, borderColor: SECTOR_TINTS.day }]}
+                        onPress={() => toggleDay(idx)}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.pillText, on && styles.pillTextActive]}>{lbl}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {errors.days ? <Text style={styles.fieldError}>{errors.days}</Text> : null}
+              </>
+            )}
+
+            {recurrence === 'interval_seconds' && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>A cada</Text>
+                <View style={styles.intervalRow}>
+                  <TextInput
+                    style={[styles.intervalInput, errors.interval && styles.inputError]}
+                    value={intervalValue}
+                    onChangeText={text => {
+                      setIntervalValue(text.replace(/[^0-9]/g, ''));
+                      if (errors.interval) setErrors(e => ({ ...e, interval: null }));
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    editable={!isSaving}
+                  />
+                  {[
+                    { key: 'hours', label: 'horas' },
+                    { key: 'days', label: 'dias' },
+                  ].map(u => {
+                    const active = intervalUnit === u.key;
+                    return (
+                      <PressableScale
+                        key={u.key}
+                        style={[styles.unitChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
+                        onPress={() => setIntervalUnit(u.key)}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.unitChipText, active && styles.unitChipTextActive]}>{u.label}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {errors.interval ? <Text style={styles.fieldError}>{errors.interval}</Text> : null}
+              </>
+            )}
+
+            {needsDate && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>{recurrence === 'once' ? 'Data' : 'A partir de'}</Text>
+                <Pressable
+                  style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
+                  onPress={toggleCalendar}
+                  disabled={isSaving}
+                >
+                  <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
+                    {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
+                  </Text>
+                  <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
+                </Pressable>
+                <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
+                  <CalendarPicker
+                    selectedDate={selectedDate}
+                    onSelect={handleDaySelect}
+                    theme={theme}
+                  />
+                </AnimatedExpand>
+              </>
+            )}
 
             <Text style={[styles.label, { marginTop: 14 }]}>Horário</Text>
             <Pressable
@@ -396,11 +592,16 @@ export default function RemindersScreen({ navigation }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
   const hasLoadedRemindersRef = useRef(false);
+  // Bloqueia o swipe de navegação (→ Chat) enquanto há modal/sheet aberto —
+  // senão arrastar as pílulas/chips dentro do modal vaza pro PanResponder da
+  // página e troca de tela sem querer.
+  const overlayOpenRef = useRef(false);
   const screenWidth = Dimensions.get('window').width;
 
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
+        !overlayOpenRef.current &&
         Math.abs(g.dx) > Math.abs(g.dy) * 2 && Math.abs(g.dx) > 20,
       onPanResponderMove: (_, g) => {
         if (g.dx > 0) {
@@ -457,6 +658,12 @@ export default function RemindersScreen({ navigation }) {
       fetchReminders();
     }, [fetchReminders]),
   );
+
+  // Mantém a guarda do swipe sincronizada: qualquer overlay aberto trava a
+  // navegação por gesto horizontal da página.
+  useEffect(() => {
+    overlayOpenRef.current = !!(editingReminder || deletingReminder || actionReminder);
+  }, [editingReminder, deletingReminder, actionReminder]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -782,15 +989,15 @@ function makeModalStyles(theme) {
       maxHeight: Dimensions.get('window').height * 0.88,
     },
     handleArea: {
-      paddingTop: 12,
-      paddingBottom: 4,
+      paddingTop: 14,
+      paddingBottom: 16,
       alignItems: 'center',
     },
     handle: {
-      width: 40,
-      height: 4,
+      width: 48,
+      height: 5,
       backgroundColor: theme.border,
-      borderRadius: 2,
+      borderRadius: 3,
     },
     scrollContent: {
       paddingHorizontal: 24,
@@ -867,6 +1074,124 @@ function makeModalStyles(theme) {
       marginLeft: 4,
       fontFamily: 'System',
     },
+    presetRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 10,
+    },
+    preset: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+    },
+    presetActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    presetText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    presetTextActive: {
+      color: '#FFFFFF',
+    },
+    pillRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 4,
+    },
+    pill: {
+      minWidth: 46,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+      alignItems: 'center',
+    },
+    pillActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    pillText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    pillTextActive: {
+      color: '#FFFFFF',
+    },
+    typeRow: {
+      flexDirection: 'row',
+      gap: 8,
+      paddingVertical: 2,
+      paddingRight: 8,
+    },
+    typeChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+    },
+    typeChipActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    typeChipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    typeChipTextActive: { color: '#FFFFFF' },
+    intervalRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    intervalInput: {
+      width: 72,
+      backgroundColor: theme.surface2,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 16,
+      color: theme.textPrimary,
+      fontFamily: 'System',
+      textAlign: 'center',
+    },
+    unitChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface2,
+    },
+    unitChipActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primary,
+    },
+    unitChipText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
+    unitChipTextActive: { color: '#FFFFFF' },
     buttons: {
       flexDirection: 'row',
       gap: 12,

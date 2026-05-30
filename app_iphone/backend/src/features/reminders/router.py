@@ -4,22 +4,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.dependencies import get_current_user
 from src.features.reminders.schemas import (
+    ReminderCreate,
     ReminderDeleteResponse,
     ReminderListResponse,
     ReminderOut,
     ReminderUpdate,
     SyncResponse,
 )
-from src.features.reminders.service import list_reminders, remove_reminder, sync_reminders, update_reminder
+from src.features.reminders.service import (
+    create_reminder_api,
+    list_reminders,
+    remove_reminder,
+    sync_reminders,
+    update_reminder,
+)
 from src.models.models import User
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
 
 
+@router.post("", response_model=ReminderOut, status_code=status.HTTP_201_CREATED)
+async def create_reminder_endpoint(
+    payload: ReminderCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReminderOut:
+    return await create_reminder_api(db, current_user.id, payload)
+
+
 @router.get("", response_model=ReminderListResponse, status_code=status.HTTP_200_OK)
 async def get_reminders(
     active_only: bool = Query(default=True),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=500, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

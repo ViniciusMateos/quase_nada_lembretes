@@ -6,7 +6,7 @@ O projeto existe em duas versões:
 
 | Versão | Descrição | Stack |
 |--------|-----------|-------|
-| **Telegram Bot** | Versão original, roda em servidor Python | python-telegram-bot + Gemini AI + SQLite |
+| **Telegram Bot** | Cliente do backend do app — mesma IA, recorrência e banco | python-telegram-bot + httpx |
 | **App iOS** | Versão atual em desenvolvimento | React Native + FastAPI + Gemini AI + SQLite |
 
 ---
@@ -32,7 +32,7 @@ O projeto existe em duas versões:
 - Python 3.10+
 - Uma conta no Telegram
 - Token de bot obtido via [@BotFather](https://t.me/botfather)
-- Chave de API do [Google Gemini](https://aistudio.google.com/app/apikey)
+- O **backend do app iOS rodando** (o bot é um cliente dele — veja [Backend (FastAPI)](#backend-fastapi)). A chave do Gemini fica no backend, não no bot.
 
 ### Para o App iOS
 
@@ -62,22 +62,26 @@ pip install -r requirements.txt
 # 4. Configure as variáveis de ambiente
 # Crie um arquivo .env na raiz com o conteúdo:
 # TELEGRAM_TOKEN=seu_token_aqui
-# GOOGLE_API_KEY=sua_chave_gemini_aqui
+# BACKEND_URL=http://127.0.0.1:8000   # base do backend FastAPI (padrão)
 
-# 5. Execute o bot
+# 5. Suba o backend do app (em outra aba) — o bot depende dele
+#    (veja a seção "Backend (FastAPI)" abaixo)
+
+# 6. Execute o bot
 python quase_nada_lembretes.py
 ```
 
 O bot estará online. No Telegram, envie `/start` para começar.
+
+> O bot não tem mais IA, banco nem agendamento próprios: cada chat vira um usuário no backend (registro/login automáticos, sessões em `tg_sessions.json`), as mensagens vão para `POST /messages` e os lembretes são disparados consultando `/reminders/sync` periodicamente.
 
 **Comandos disponíveis no bot:**
 
 | Comando / Mensagem | Ação |
 |--------------------|------|
 | `/start` | Apresenta o bot |
-| `/listar` | Lista todos os lembretes ativos |
-| `/cancelar` | Cancela um lembrete existente |
-| Texto livre | Gemini AI interpreta e agenda o lembrete |
+| Texto livre | A IA do backend interpreta e agenda / lista / edita / cancela o lembrete |
+| Áudio | Não suportado — o bot responde pedindo texto |
 
 ---
 
@@ -204,7 +208,7 @@ Após o build (~15 minutos), a Expo disponibilizará um link para download do ar
 | Variável | Obrigatório | Descrição |
 |----------|:-----------:|-----------|
 | `TELEGRAM_TOKEN` | ✅ | Token do bot obtido via @BotFather |
-| `GOOGLE_API_KEY` | ✅ | Chave da API Google Gemini |
+| `BACKEND_URL` | ❌ | Base do backend FastAPI que o bot consome (padrão: `http://127.0.0.1:8000`) |
 
 ### Backend iOS (`app_iphone/backend/.env`)
 
@@ -309,9 +313,12 @@ Envia uma mensagem em linguagem natural. A IA interpreta a intenção (`reminder
 ```json
 {
   "content": "me lembra de ligar pro dentista amanhã às 9h",
-  "client_timestamp": "2026-04-15T22:00:00-03:00"
+  "client_timestamp": "2026-04-15T22:00:00-03:00",
+  "hour_format": "24h"
 }
 ```
+
+`hour_format` (`"12h"` ou `"24h"`, padrão `"24h"`) indica o formato de hora do usuário. Quando é `"12h"` e o horário é ambíguo (ex.: "às 9h" sem manhã/noite), a resposta vem com `action.type = "needs_time_clarification"` e o app pergunta se é de manhã ou à noite antes de criar o lembrete.
 
 **Response 200:**
 ```json
@@ -348,7 +355,7 @@ Envia uma mensagem em linguagem natural. A IA interpreta a intenção (`reminder
 
 | Parâmetro | Tipo | Padrão | Descrição |
 |-----------|------|--------|-----------|
-| `limit` | int | 20 | Máximo de itens retornados |
+| `limit` | int | 500 | Máximo de itens retornados (1–500) |
 | `offset` | int | 0 | Paginação — itens a pular |
 | `active_only` | bool | true | Filtrar apenas lembretes ativos |
 
@@ -358,20 +365,60 @@ Envia uma mensagem em linguagem natural. A IA interpreta a intenção (`reminder
   "reminders": [
     {
       "id": "rem_01HABC...",
-      "title": "Ligar pro dentista",
-      "next_execution": "2026-04-16T09:00:00-03:00",
-      "recurrence": null,
+      "title": "Bater ponto",
+      "next_execution": "2026-04-27T09:00:00-03:00",
+      "recurrence": "weekly_days",
       "recurrence_str": null,
+      "days_of_week": [0, 1, 2, 3, 4],
       "end_date": null,
       "is_active": true,
       "created_at": "2026-04-15T22:00:00Z"
     }
   ],
   "total": 1,
-  "limit": 20,
+  "limit": 500,
   "offset": 0
 }
 ```
+
+---
+
+#### `POST /reminders` — Criar lembrete diretamente
+
+Cria um lembrete sem passar pela IA (usado, por exemplo, pelo "adiar" de lembretes pontuais).
+
+**Request:**
+```json
+{
+  "title": "Reunião",
+  "scheduled_time": "2026-04-16T15:00:00-03:00",
+  "recurrence": "once",
+  "days_of_week": null
+}
+```
+
+`recurrence` aceita: `once`, `daily`, `weekly`, `weekly_days`, `monthly`, `day_of_month`, `interval_seconds`. Para `weekly_days`, informe `days_of_week` (lista de inteiros, Seg=0 … Dom=6).
+
+---
+
+#### `PATCH /reminders/{id}` — Editar lembrete
+
+Edita título, horário e/ou recorrência. Permite tornar um lembrete pontual em recorrente, trocar o tipo de recorrência ou remover a recorrência (enviando `recurrence: "once"`). A próxima execução é recalculada **em horário de Brasília** (dispara hoje se o horário ainda não passou e o dia é válido; senão vai pra próxima ocorrência).
+
+**Request (todos os campos opcionais — só o que vier é alterado):**
+```json
+{
+  "title": "Bater ponto",
+  "scheduled_time": "2026-04-27T09:00:00-03:00",
+  "recurrence": "weekly_days",
+  "days_of_week": [0, 1, 2, 3, 4],
+  "interval_seconds": null
+}
+```
+
+`recurrence` aceita os mesmos valores do `POST`. Para `weekly_days`, informe `days_of_week`; para `interval_seconds`, informe `interval_seconds`.
+
+**Response 200:** o lembrete atualizado (mesmo formato do item de `GET /reminders`).
 
 ---
 
@@ -415,6 +462,24 @@ Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo 
 
 ---
 
+### Push Notifications
+
+> Scaffolding — o **envio** de push é fase 2. Por enquanto a API só registra o token do dispositivo.
+
+#### `POST /push/register` — Registrar token de push
+
+**Request:**
+```json
+{
+  "token": "ExponentPushToken[xxxxxxxx]",
+  "platform": "ios"
+}
+```
+
+**Response 204** (sem corpo). Se o token já existir, é reassociado ao usuário atual.
+
+---
+
 ## Arquitetura
 
 ### Telegram Bot
@@ -423,16 +488,13 @@ Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo 
 Usuário (Telegram)
        │
        ▼
-python-telegram-bot
+python-telegram-bot (cliente, httpx)
+       │   auth por chat_id · sessões em tg_sessions.json
+       ▼
+Backend FastAPI ──► Google Gemini AI + SQLite (compartilhados com o app)
        │
-       ├── Comando (/listar, /cancelar)
-       │         └── SQLite (lembretes.db)
-       │
-       └── Texto livre
-                 └── Google Gemini AI
-                           └── Extrai: título, data, hora, recorrência
-                                     └── APScheduler (agenda notificação)
-                                               └── Telegram → Usuário
+       ├── POST /messages       → IA interpreta e cria / lista / edita / deleta
+       └── GET  /reminders/sync → bot agenda e dispara no Telegram no horário
 ```
 
 ### App iOS
@@ -475,6 +537,7 @@ reminders
   ├── interval_seconds
   ├── recurrence
   ├── recurrence_str
+  ├── days_of_week        # CSV "0,1,2,3,4" p/ recurrence="weekly_days"
   ├── end_date
   └── is_active
 
@@ -485,6 +548,14 @@ chat_history
   ├── content
   ├── intent
   └── model_used
+
+push_tokens               # scaffolding (envio = fase 2)
+  ├── id (PK)
+  ├── user_id (FK → users)
+  ├── token (unique)
+  ├── platform (ios | android)
+  ├── created_at
+  └── updated_at
 ```
 
 ---
@@ -590,19 +661,23 @@ quase_nada_lembretes/
     │       ├── features/
     │       │   ├── auth/      # Registro e login
     │       │   ├── messages/  # Chat com a IA
-    │       │   └── reminders/ # CRUD de lembretes
+    │       │   ├── reminders/ # CRUD de lembretes (incl. recorrência por dias da semana)
+    │       │   └── push/      # Registro de tokens de push (scaffolding)
     │       ├── middleware/    # Tratamento global de erros
-    │       └── models/        # Modelos SQLAlchemy (User, Reminder, ChatHistory)
+    │       └── models/        # Modelos SQLAlchemy (User, Reminder, ChatHistory, PushToken)
     │
     └── frontend/
-        ├── App.js             # Ponto de entrada React Native
-        ├── app.json           # Configuração Expo
+        ├── index.js           # Ponto de entrada (registra o root component)
+        ├── App.js             # Componente raiz React Native
+        ├── app.config.js      # Configuração Expo
         ├── eas.json           # Configuração EAS Build
         └── src/
-            ├── api/           # Chamadas HTTP para o backend
-            ├── components/    # Componentes reutilizáveis
-            ├── context/       # AuthContext (estado de autenticação)
+            ├── api/           # Chamadas HTTP para o backend (client com refresh)
+            ├── components/    # Componentes reutilizáveis (PressableScale, CalendarPicker, ...)
+            ├── context/       # AuthContext, NotificationSettingsContext, ThemeContext
+            ├── lib/           # storage MMKV (instância única, sem ciclo de import)
             ├── navigation/    # AppNavigator (rotas)
-            ├── screens/       # Chat, Login, Register
-            └── services/      # Serviço de notificações (@notifee)
+            ├── screens/       # Chat, Lembretes, Login, Register, NotificationSettings
+            ├── services/      # Notificações, fila de mensagens e tarefas em background
+            └── utils/         # Formatação de hora (12h/24h)
 ```

@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     interval_seconds    INTEGER,
     recurrence          TEXT,
     recurrence_str      TEXT,
+    days_of_week        TEXT,
     end_date            TEXT,
     is_active           INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT NOT NULL,
@@ -66,6 +67,16 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE INDEX IF NOT EXISTS idx_reminders_user_id ON reminders(user_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_next_execution ON reminders(next_execution);
 CREATE INDEX IF NOT EXISTS idx_reminders_user_active ON reminders(user_id, is_active);
+
+CREATE TABLE IF NOT EXISTS push_tokens (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token       TEXT NOT NULL UNIQUE,
+    platform    TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
 
 CREATE TABLE IF NOT EXISTS chat_history (
     id          TEXT PRIMARY KEY,

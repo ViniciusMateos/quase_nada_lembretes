@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import PressableScale from './PressableScale';
 
 const WEEK_DAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 const MONTHS_PT = [
@@ -44,25 +45,47 @@ export default function CalendarPicker({ selectedDate, onSelect, theme }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const cells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
 
-  const prevMonth = () => {
-    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
-    else setViewMonth(m => m - 1);
+  // Slide direcional ao trocar de mês: avançar = conteúdo sai pra esquerda e o
+  // novo entra da direita; voltar = o oposto. (Animated core, padrão do app.)
+  const slideX = useRef(new Animated.Value(0)).current;
+  const gridOpacity = useRef(new Animated.Value(1)).current;
+  const animatingRef = useRef(false);
+
+  const changeMonth = direction => {
+    if (animatingRef.current) return;
+    animatingRef.current = true;
+    Animated.parallel([
+      Animated.timing(slideX, { toValue: -direction * 26, duration: 110, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      Animated.timing(gridOpacity, { toValue: 0, duration: 110, useNativeDriver: true }),
+    ]).start(() => {
+      if (direction > 0) {
+        if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+        else setViewMonth(m => m + 1);
+      } else {
+        if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+        else setViewMonth(m => m - 1);
+      }
+      slideX.setValue(direction * 26);
+      Animated.parallel([
+        Animated.spring(slideX, { toValue: 0, useNativeDriver: true, tension: 90, friction: 11 }),
+        Animated.timing(gridOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start(() => { animatingRef.current = false; });
+    });
   };
-  const nextMonth = () => {
-    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
-    else setViewMonth(m => m + 1);
-  };
+
+  const prevMonth = () => changeMonth(-1);
+  const nextMonth = () => changeMonth(1);
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={prevMonth} hitSlop={10} style={styles.navBtn}>
+        <PressableScale onPress={prevMonth} hitSlop={10} style={styles.navBtn}>
           <Text style={styles.navText}>{'‹'}</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.monthTitle}>{MONTHS_PT[viewMonth]} {viewYear}</Text>
-        <Pressable onPress={nextMonth} hitSlop={10} style={styles.navBtn}>
+        <PressableScale onPress={nextMonth} hitSlop={10} style={styles.navBtn}>
           <Text style={styles.navText}>{'›'}</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       <View style={styles.weekRow}>
@@ -71,7 +94,7 @@ export default function CalendarPicker({ selectedDate, onSelect, theme }) {
         ))}
       </View>
 
-      <View style={styles.grid}>
+      <Animated.View style={[styles.grid, { transform: [{ translateX: slideX }], opacity: gridOpacity }]}>
         {cells.map((cell, idx) => {
           const selected = isSameDay(cell, selectedDate);
           const today_ = isToday(cell);
@@ -100,7 +123,7 @@ export default function CalendarPicker({ selectedDate, onSelect, theme }) {
             </Pressable>
           );
         })}
-      </View>
+      </Animated.View>
     </View>
   );
 }
