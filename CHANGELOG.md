@@ -11,6 +11,24 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.2.0] - 2026-05-29
+
+### Added
+- Edição de recorrência direto no app: ao alterar um lembrete dá pra escolher o tipo (único, diário, dias da semana, semanal, mensal, intervalo), tornar um pontual em recorrente ou remover a recorrência. O backend (`PATCH /reminders/{id}`) passa a aceitar `recurrence`, `days_of_week` e `interval_seconds` e recalcula a próxima execução.
+- Animações no modal de editar lembrete: feedback de toque nas pílulas, tons distintos por setor, transição suave ao trocar de tipo, e calendário com abertura fluida + slide direcional ao passar os meses.
+
+### Changed
+- Cálculo de recorrência feito em horário de Brasília (UTC-3): corrige "seg a sex" começar na terça e faz o lembrete disparar hoje quando o horário ainda não passou.
+- Notificação sempre toca o som do app — removida a opção de usar o som padrão do sistema. Mantida a notificação prioritária (furar modos de Foco).
+- Campo de texto do chat continua editável durante o envio (só o botão de enviar fica inativo).
+
+### Fixed
+- Bottom sheet de editar lembrete agora fecha arrastando a barrinha pra baixo (gesto sensível, área de toque maior).
+- Arrastar as pílulas dentro do modal não troca mais de tela (swipe pro Chat bloqueado com overlay aberto).
+- Require cycle entre `AuthContext` e `client` resolvido extraindo o storage MMKV pra módulo próprio.
+
+---
+
 ## [1.1.0] - 2026-05-26
 
 ### Added
