@@ -19,6 +19,7 @@ class ReminderOut(BaseModel):
     recurrence: str | None
     recurrence_str: str | None
     days_of_week: list[int] | None = None
+    interval_seconds: int | None = None
     end_date: str | None
     is_active: bool
     created_at: str
@@ -32,6 +33,7 @@ class ReminderOut(BaseModel):
             recurrence=reminder.recurrence,
             recurrence_str=reminder.recurrence_str,
             days_of_week=_parse_days_csv(getattr(reminder, "days_of_week", None)),
+            interval_seconds=getattr(reminder, "interval_seconds", None),
             end_date=reminder.end_date,
             is_active=bool(reminder.is_active),
             created_at=reminder.created_at,
@@ -50,6 +52,11 @@ class ReminderUpdate(BaseModel):
     scheduled_time: str | None = None
     # lista de dias 0..6 (Seg..Dom) p/ lembretes weekly_days; None = não alterar
     days_of_week: list[int] | None = None
+    # tipo de recorrência: once | daily | weekly | weekly_days | monthly |
+    # day_of_month | interval_seconds. "once" remove a recorrência. None = não alterar.
+    recurrence: str | None = None
+    # intervalo em segundos p/ recurrence=interval_seconds; None = não alterar
+    interval_seconds: int | None = None
 
 
 class ReminderCreate(BaseModel):
