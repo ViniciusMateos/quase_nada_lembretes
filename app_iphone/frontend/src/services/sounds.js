@@ -5,6 +5,8 @@ const ASSETS = {
   send: require('../../assets/sound-send.wav'),
   receive: require('../../assets/sound-receive.wav'),
   reminder: require('../../assets/sound-reminder.wav'),
+  message: require('../../assets/normal-message.mp3'),
+  error: require('../../assets/fah.mp3'),
 };
 
 let audioModeReady = false;
@@ -62,4 +64,12 @@ export function playReceiveSound() {
 export function playReminderSound() {
   Vibration.vibrate([100, 200, 100, 200]);
   return playSound('reminder');
+}
+
+export function playMessageSound() {
+  return playSound('message');
+}
+
+export function playErrorSound() {
+  return playSound('error');
 }
