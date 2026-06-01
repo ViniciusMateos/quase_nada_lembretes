@@ -49,7 +49,7 @@ export function ThemeProvider({ children }) {
     Animated.timing(fadeAnim, {
       toValue: 0.25,
       duration: 110,
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start();
     setTimeout(() => {
       setIsDark(prev => {
@@ -60,7 +60,7 @@ export function ThemeProvider({ children }) {
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 180,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start();
     }, 120);
   };
@@ -68,7 +68,7 @@ export function ThemeProvider({ children }) {
   const theme = useMemo(() => (isDark ? DARK_THEME : LIGHT_THEME), [isDark]);
 
   return (
-    <ThemeContext.Provider value={{ theme, isDark, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, isDark, toggleTheme, fadeAnim }}>
       <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
         {children}
       </Animated.View>

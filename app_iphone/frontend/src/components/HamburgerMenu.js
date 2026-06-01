@@ -23,7 +23,7 @@ export function HamburgerIcon() {
 }
 
 export default function HamburgerMenu({ visible, onClose, navigation }) {
-  const { theme, isDark, toggleTheme } = useTheme();
+  const { theme, isDark, toggleTheme, fadeAnim } = useTheme();
   const slideAnim = useRef(new Animated.Value(300)).current;
 
   useEffect(() => {
@@ -51,7 +51,14 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} />
         <Animated.View
-          style={[styles.drawer, { backgroundColor: theme.surface, transform: [{ translateX: slideAnim }] }]}
+          style={[
+            styles.drawer,
+            {
+              backgroundColor: theme.surface,
+              transform: [{ translateX: slideAnim }],
+              opacity: fadeAnim,
+            },
+          ]}
         >
           <PressableScale style={styles.closeRow} onPress={close} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={{ color: theme.textSecondary, fontSize: 18 }}>x</Text>
