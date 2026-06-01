@@ -9,6 +9,23 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
+### Added
+- Sons novos no chat: `normal-message.mp3` (toca quando a saudação inicial aparece) e `fah.mp3` (toca em qualquer mensagem com `isError`, centralizado no `addMessage`).
+- Banner nativo em ações de lembrete: ao criar/editar/deletar pelo chat, dispara um `displayLocalNotification` silencioso ("Lembrete criado", "Lembrete editado", "Lembrete removido"). Funciona em foreground graças ao `foregroundPresentationOptions` no iOS. Vale tanto no envio direto quanto no drain da fila offline.
+- Hint "segure para adiar" concatenado no body das notificações de lembrete (`scheduleFromSync`, `scheduleSnoozeNotification`, `scheduleServerReminderNotification`), pra deixar visível que há ações no long-press.
+- Fade overlay no fim do scroll horizontal das pills de Recorrência (5 bands com opacity progressiva), sinalizando mais opções e dando acabamento na borda direita.
+- Pull-to-refresh em Lembretes usando o `LoadingDog` (cachorrinho) como overlay no topo da lista — o `RefreshControl` nativo mantém o gesto, só fica com spinner invisível.
+
+### Changed
+- `SplashScreen` reestilizado no padrão do financas: fundo laranja `#FF8234` (era preto) com o cachorrinho branco dimensionado por `min(width * 0.6, 240)`.
+- Transição entre as abas Chat ↔ Lembretes mais fluida: `lazy: false`, `freezeOnBlur: false` e `sceneContainerStyle` no Tab.Navigator + `useFocusEntrance` agora é uma entrada bem mais sutil (`opacity 0.85 → 1` em 140ms, era spring de 0).
+- Drain da fila offline também roda quando o app volta pro foreground (listener de `AppState 'active'`), cobrindo o caso em que o NetInfo não dispara mudança porque a rede já estava ativa.
+- Removida a menção a "Critical Alerts" na tela de Notificações — o app já usa Time-Sensitive Notifications, o aviso virou ruído.
+- Removidos os emojis 📡 e ⏳ das mensagens "Sem conexão agora" e "enviado da fila" no chat.
+
+### Fixed
+- Erro `useNativeDriver` no toggle de tema do menu hamburguer: o `fadeAnim` virou `useNativeDriver: true` (opacity suporta nativamente) — antes era JS-driven e gerava `node moved to native earlier` por conflitar com o `slideAnim` nativo do drawer.
+
 ---
 
 ## [1.2.0] - 2026-05-29
