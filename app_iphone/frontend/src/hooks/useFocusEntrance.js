@@ -7,12 +7,11 @@ export default function useFocusEntrance() {
 
   useFocusEffect(
     useCallback(() => {
-      entrance.setValue(0);
-      Animated.spring(entrance, {
+      entrance.setValue(0.85);
+      Animated.timing(entrance, {
         toValue: 1,
+        duration: 140,
         useNativeDriver: true,
-        tension: 80,
-        friction: 10,
       }).start();
     }, [entrance]),
   );
@@ -22,8 +21,8 @@ export default function useFocusEntrance() {
     transform: [
       {
         translateY: entrance.interpolate({
-          inputRange: [0, 1],
-          outputRange: [10, 0],
+          inputRange: [0.85, 1],
+          outputRange: [2, 0],
         }),
       },
     ],

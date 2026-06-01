@@ -1,4 +1,4 @@
-import { View, StyleSheet, Image } from 'react-native';
+import { View, StyleSheet, Image, useWindowDimensions } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
@@ -17,9 +17,11 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function SplashScreen() {
+  const { width } = useWindowDimensions();
+  const dogSize = Math.min(width * 0.6, 240);
   return (
     <View style={styles.splash}>
-      <LoadingDog size={76} color="#FF8234" />
+      <LoadingDog size={dogSize} color="#FFFFFF" />
     </View>
   );
 }
@@ -49,6 +51,9 @@ function AppTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        lazy: false,
+        freezeOnBlur: false,
+        sceneContainerStyle: { backgroundColor: theme.background },
         tabBarStyle: {
           backgroundColor: theme.tabBar,
           borderTopColor: theme.tabBarBorder,
@@ -113,7 +118,7 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: '#0A0A0F',
+    backgroundColor: '#FF8234',
     alignItems: 'center',
     justifyContent: 'center',
   },
