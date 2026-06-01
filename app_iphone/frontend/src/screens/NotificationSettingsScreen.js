@@ -46,12 +46,6 @@ export default function NotificationSettingsScreen({ navigation }) {
           </View>
         </View>
 
-        <Text style={styles.note}>
-          O iPhone não permite que apps comuns furem o “Não Perturbe” por completo nem
-          forcem o volume máximo — isso exige uma permissão especial (Critical Alerts)
-          aprovada pela Apple, que não está ativa neste app.
-        </Text>
-
         <PressableScale style={styles.linkRow} onPress={() => Linking.openSettings()}>
           <Text style={styles.linkText}>Abrir ajustes do sistema</Text>
           <ChevronIcon direction="right" color={theme.textSecondary} size={24} />
@@ -89,14 +83,6 @@ function makeStyles(theme) {
     rowTitle: { fontSize: 16, color: theme.textPrimary, fontFamily: 'System', marginBottom: 4 },
     rowDesc: { fontSize: 13, color: theme.textSecondary, fontFamily: 'System', lineHeight: 18 },
     divider: { height: 1, backgroundColor: theme.border, marginHorizontal: 16 },
-    note: {
-      fontSize: 12,
-      color: theme.textSecondary,
-      fontFamily: 'System',
-      lineHeight: 18,
-      marginTop: 16,
-      marginHorizontal: 4,
-    },
     linkRow: {
       flexDirection: 'row',
       alignItems: 'center',
