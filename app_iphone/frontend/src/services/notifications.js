@@ -15,6 +15,7 @@ const IOS_SOUND = 'sound-reminder.wav';
 const ANDROID_SOUND = 'sound_reminder';
 
 const SNOOZE_PREFIX = 'snooze_';
+const SNOOZE_HINT = '\nsegure para adiar';
 
 // Som do app SEMPRE — nunca o som padrão do sistema (decisão de produto:
 // o lembrete sempre toca a voz/efeito do Quase Nada, sem opção de desligar).
@@ -120,6 +121,14 @@ function buildNotification(id, title, body) {
       categoryId: CATEGORY_ID,
       // timeSensitive fura modos de Foco; 'active' é o nível normal.
       interruptionLevel: priority ? 'timeSensitive' : 'active',
+      // Sem isso, iOS suprime o banner quando o app está em foreground.
+      foregroundPresentationOptions: {
+        alert: true,
+        badge: true,
+        sound: true,
+        banner: true,
+        list: true,
+      },
     },
   };
 }
@@ -146,7 +155,7 @@ export async function scheduleFromSync(syncData) {
         const notif = buildNotification(
           `${reminder.id}_${triggerTimestamp}`,
           'Quase Nada Lembretes',
-          reminder.title,
+          reminder.title + SNOOZE_HINT,
         );
         notif.data = {
           reminderId: reminder.id,
@@ -174,7 +183,7 @@ export async function scheduleSnoozeNotification({ reminderId, title, minutes })
     const notif = buildNotification(
       `${SNOOZE_PREFIX}${reminderId || 'x'}_${Date.now()}`,
       'Quase Nada Lembretes',
-      title || 'Lembrete',
+      (title || 'Lembrete') + SNOOZE_HINT,
     );
     await notifee.createTriggerNotification(notif, {
       type: TriggerType.TIMESTAMP,
@@ -189,7 +198,7 @@ export async function scheduleSnoozeNotification({ reminderId, title, minutes })
 // que o próximo scheduleFromSync a gerencie sem duplicar.
 async function scheduleServerReminderNotification(reminderId, title, timestamp) {
   await ensureChannel();
-  const notif = buildNotification(`${reminderId}_${timestamp}`, 'Quase Nada Lembretes', title);
+  const notif = buildNotification(`${reminderId}_${timestamp}`, 'Quase Nada Lembretes', title + SNOOZE_HINT);
   notif.data = { reminderId, title, isRecurring: '0' };
   await notifee.createTriggerNotification(notif, {
     type: TriggerType.TIMESTAMP,
@@ -236,14 +245,21 @@ export async function handleNotificationEvent({ type, detail }) {
   }
 }
 
-// Notificação local imediata (ex.: "Lembrete registrado" quando processado em background).
-export async function displayLocalNotification(title, body) {
+// Notificação local imediata (ex.: "Lembrete registrado" quando processado em background,
+// ou confirmações do chat). `silent: true` derruba o som de sistema — usar quando o app
+// já está tocando o som de "received" pela tela.
+export async function displayLocalNotification(title, body, { silent = false } = {}) {
   try {
     await ensureChannel();
     const notif = buildNotification(`local_${Date.now()}`, title, body);
     // remove ações de adiar nesse aviso informativo
     notif.android.actions = undefined;
     notif.ios.categoryId = undefined;
+    if (silent) {
+      notif.android.sound = undefined;
+      notif.ios.sound = undefined;
+      notif.ios.foregroundPresentationOptions.sound = false;
+    }
     await notifee.displayNotification(notif);
   } catch (error) {
     console.warn('[Notifications] Erro ao exibir notificação local:', error);
