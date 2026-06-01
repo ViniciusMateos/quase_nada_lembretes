@@ -9,6 +9,10 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] - 2026-05-31
+
 ### Added
 - Sons novos no chat: `normal-message.mp3` (toca quando a saudação inicial aparece) e `fah.mp3` (toca em qualquer mensagem com `isError`, centralizado no `addMessage`).
 - Banner nativo em ações de lembrete: ao criar/editar/deletar pelo chat, dispara um `displayLocalNotification` silencioso ("Lembrete criado", "Lembrete editado", "Lembrete removido"). Funciona em foreground graças ao `foregroundPresentationOptions` no iOS. Vale tanto no envio direto quanto no drain da fila offline.
