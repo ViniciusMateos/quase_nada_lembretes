@@ -13,11 +13,12 @@ import {
   Image,
   PanResponder,
   Dimensions,
+  AppState,
 } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { sendMessage } from '../api/messages.api';
 import { deleteReminder, syncReminders, listReminders } from '../api/reminders.api';
-import { requestPermission, scheduleFromSync } from '../services/notifications';
+import { requestPermission, scheduleFromSync, displayLocalNotification } from '../services/notifications';
 import { enqueueMessage, drainQueue } from '../services/messageQueue';
 import { detectIs12h } from '../utils/timeFormat';
 import { useAuth } from '../context/AuthContext';
@@ -30,7 +31,7 @@ import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
 import LoadingDog from '../components/LoadingDog';
 import PressableScale from '../components/PressableScale';
 import useFocusEntrance from '../hooks/useFocusEntrance';
-import { playReceiveSound, playSendSound, preloadSounds } from '../services/sounds';
+import { playReceiveSound, playSendSound, playMessageSound, playErrorSound, preloadSounds } from '../services/sounds';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -46,6 +47,19 @@ function getGreeting(name) {
 
 function generateId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+const BANNER_TITLES = {
+  reminder_created: 'Lembrete criado',
+  reminder_updated: 'Lembrete editado',
+  reminder_deleted: 'Lembrete removido',
+};
+
+function showReminderActionBanner(actionType, action) {
+  const title = BANNER_TITLES[actionType];
+  if (!title) return;
+  const body = action?.reminder?.title || action?.reminder_title || 'Lembrete';
+  displayLocalNotification(title, body, { silent: true });
 }
 
 export default function ChatScreen({ navigation }) {
@@ -124,6 +138,7 @@ export default function ChatScreen({ navigation }) {
   const addMessage = useCallback(
     message => {
       setMessages(prev => [...prev, message]);
+      if (message?.isError) playErrorSound();
       scrollToBottom();
     },
     [scrollToBottom],
@@ -176,6 +191,7 @@ export default function ChatScreen({ navigation }) {
         },
       ]);
       setShowInitialTyping(false);
+      playMessageSound();
       scrollToBottom();
     }, 650);
 
@@ -201,13 +217,14 @@ export default function ChatScreen({ navigation }) {
       addMessage({
         id: result.message_id || generateId(),
         role: 'assistant',
-        content: `${result.response}\n\n⏳ enviado da fila (você estava sem conexão)`,
+        content: `${result.response}\n\nenviado da fila (você estava sem conexão)`,
         timestamp: new Date().toISOString(),
         action: result.action || null,
       });
       const t = result.action?.type;
       if (t === 'reminder_created' || t === 'reminder_updated' || t === 'reminder_deleted') {
         await handleSync();
+        showReminderActionBanner(t, result.action);
       }
     });
   }, [addMessage, handleSync]);
@@ -218,6 +235,15 @@ export default function ChatScreen({ navigation }) {
       if (state.isConnected) drainOfflineQueue();
     });
     return () => unsubscribe();
+  }, [drainOfflineQueue]);
+
+  // Também tenta esvaziar a fila quando o app volta pro foreground: cobre o caso
+  // em que o NetInfo não disparou (rede já estava ativa) mas a fila não rodou.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') drainOfflineQueue();
+    });
+    return () => sub.remove();
   }, [drainOfflineQueue]);
 
   useEffect(() => {
@@ -302,6 +328,7 @@ export default function ChatScreen({ navigation }) {
         actionType === 'reminder_deleted'
       ) {
         await handleSync();
+        showReminderActionBanner(actionType, result.action);
         if (actionType === 'reminder_created') {
           await confirmReminderCreated(result.action.reminder);
         }
@@ -327,7 +354,7 @@ export default function ChatScreen({ navigation }) {
         addMessage({
           id: generateId(),
           role: 'assistant',
-          content: 'Sem conexão agora 📡\nVou enviar assim que a internet voltar.',
+          content: 'Sem conexão agora.\nVou enviar assim que a internet voltar.',
           timestamp: new Date().toISOString(),
           action: null,
           isError: true,
