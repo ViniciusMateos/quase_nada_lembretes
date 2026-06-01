@@ -358,31 +358,40 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
 
             <Text style={styles.label}>Recorrência</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.typeRow}
-              keyboardShouldPersistTaps="handled"
-            >
-              {RECURRENCE_TYPES.map(t => {
-                const active = recurrence === t.key;
-                return (
-                  <PressableScale
-                    key={t.key}
-                    style={[styles.typeChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
-                    onPress={() => {
-                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                      setRecurrence(t.key);
-                      setCalendarVisible(false);
-                      setErrors(e => ({ ...e, days: null, datetime: null, interval: null }));
-                    }}
-                    disabled={isSaving}
-                  >
-                    <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{t.label}</Text>
-                  </PressableScale>
-                );
-              })}
-            </ScrollView>
+            <View style={styles.typeScrollWrap}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.typeRow}
+                keyboardShouldPersistTaps="handled"
+              >
+                {RECURRENCE_TYPES.map(t => {
+                  const active = recurrence === t.key;
+                  return (
+                    <PressableScale
+                      key={t.key}
+                      style={[styles.typeChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
+                      onPress={() => {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        setRecurrence(t.key);
+                        setCalendarVisible(false);
+                        setErrors(e => ({ ...e, days: null, datetime: null, interval: null }));
+                      }}
+                      disabled={isSaving}
+                    >
+                      <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{t.label}</Text>
+                    </PressableScale>
+                  );
+                })}
+              </ScrollView>
+              <View pointerEvents="none" style={styles.typeScrollFade}>
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '00', width: 6 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '33', width: 6 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '80', width: 8 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + 'CC', width: 8 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface, width: 6 }]} />
+              </View>
+            </View>
 
             {recurrence === 'weekly_days' && (
               <>
@@ -782,39 +791,48 @@ export default function RemindersScreen({ navigation }) {
         {reminders.length > 0 && (
           <Text style={styles.editHint}>Clique no lembrete para editar</Text>
         )}
-        <FlatList
-          data={sections}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => {
-            if (item.type === 'header') {
-              return <Text style={styles.sectionHeader}>{item.title}</Text>;
-            }
-            return (
-              <ReminderItem
-                reminder={item.reminder}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onLongPress={handleReminderAction}
-                theme={theme}
-              />
-            );
-          }}
-          contentContainerStyle={sections.length === 0 ? styles.emptyContainer : styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor={theme.primary}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.centered}>
-              <Text style={styles.emptyText}>Nenhum lembrete criado ainda.</Text>
-              <Text style={styles.emptySubtext}>Peça ao chat para criar um!</Text>
+        <View style={styles.listWrap}>
+          {isRefreshing && (
+            <View style={styles.refreshOverlay} pointerEvents="none">
+              <LoadingDog size={42} color={theme.primary} />
             </View>
-          }
-        />
+          )}
+          <FlatList
+            data={sections}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => {
+              if (item.type === 'header') {
+                return <Text style={styles.sectionHeader}>{item.title}</Text>;
+              }
+              return (
+                <ReminderItem
+                  reminder={item.reminder}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onLongPress={handleReminderAction}
+                  theme={theme}
+                />
+              );
+            }}
+            contentContainerStyle={sections.length === 0 ? styles.emptyContainer : styles.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={handleRefresh}
+                tintColor="transparent"
+                colors={['transparent']}
+                progressBackgroundColor="transparent"
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.centered}>
+                <Text style={styles.emptyText}>Nenhum lembrete criado ainda.</Text>
+                <Text style={styles.emptySubtext}>Peça ao chat para criar um!</Text>
+              </View>
+            }
+          />
+        </View>
 
         <EditReminderModal
           visible={!!editingReminder}
@@ -881,6 +899,15 @@ function makeStyles(theme) {
     },
     listContent: { paddingBottom: 24 },
     emptyContainer: { flex: 1 },
+    listWrap: { flex: 1, position: 'relative' },
+    refreshOverlay: {
+      position: 'absolute',
+      top: 12,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      zIndex: 10,
+    },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
     sectionHeader: {
       fontSize: 12,
@@ -1129,6 +1156,20 @@ function makeModalStyles(theme) {
     },
     pillTextActive: {
       color: '#FFFFFF',
+    },
+    typeScrollWrap: {
+      position: 'relative',
+    },
+    typeScrollFade: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      bottom: 0,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+    },
+    typeFadeBand: {
+      height: '100%',
     },
     typeRow: {
       flexDirection: 'row',
