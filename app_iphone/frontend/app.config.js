@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? 'QN Lembretes DEV' : 'Quase Nada Lembretes',
     slug: 'quase-nada-lembretes',
-    version: '1.3.0',
+    version: '1.4.0',
     orientation: 'portrait',
     icon: IS_DEV ? './assets/icon-dev.png' : './assets/icon-prod.png',
     userInterfaceStyle: 'dark',

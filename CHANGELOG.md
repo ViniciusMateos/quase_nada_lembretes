@@ -11,6 +11,26 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.4.0] - 2026-06-22
+
+### Added
+- Aba de **Tarefas** no app iOS: tarefas semanais por usuário (backend feature `tasks` em `/api/v1/tasks`), com prioridades (alta/média/baixa), anotações, conclusão e **carry-over** de pendentes entre semanas. Navegação de semanas com setas, swipe e picker ano → mês → semana (com destaque do dia/semana atuais).
+- **Reordenação por arraste** das tarefas (segurar) dentro da mesma prioridade, com o espaço abrindo em tempo real e persistência via `order_index`.
+- **Integração cruzada**: segure uma tarefa para criar um lembrete (com o nome da tarefa) e segure um lembrete para criar uma tarefa (com o nome do lembrete). Modal de lembrete extraído (`ReminderFormModal`) e reutilizado.
+- Tab bar **liquid glass** (blur nativo via `expo-blur`) com pílula laranja, **ripple** no toque (luz contínua ao segurar, expande ao soltar), **squash** na transição e **swipe** na própria barra pra trocar de aba.
+- **Data do dia** no topo do Chat e dos Lembretes; menu hambúrguer em **cards de vidro**.
+- Animações: entrada **direcional** ao trocar de aba, conclusão (a tarefa desliza pra baixo) e exclusão (some com colapso) em tarefas e lembretes.
+
+### Changed
+- App abre sempre na aba **Chat**.
+- No Lembrete, **segurar** passou a **criar tarefa** (antes abria menu de editar/excluir). Editar continua por toque; excluir pelo ✕.
+- Dependências nativas novas: `expo-blur`, `expo-linear-gradient` (exigem novo build).
+
+### Fixed
+- Os modais de criar/editar (tarefa e lembrete) não quebram mais ao abrir data/hora **com o teclado aberto** — a altura do sheet passa a respeitar o espaço acima do teclado e o conteúdo rola por dentro.
+
+---
+
 ## [1.3.0] - 2026-05-31
 
 ### Added
