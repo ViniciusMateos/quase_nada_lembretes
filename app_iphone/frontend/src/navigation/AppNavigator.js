@@ -8,10 +8,12 @@ import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ChatScreen from '../screens/ChatScreen';
 import RemindersScreen from '../screens/RemindersScreen';
+import TasksScreen from '../screens/TasksScreen';
 import AccountScreen from '../screens/AccountScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
 import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 import LoadingDog from '../components/LoadingDog';
+import LiquidTabBar from '../components/LiquidTabBar';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -49,21 +51,28 @@ function AppTabs() {
 
   return (
     <Tab.Navigator
+      initialRouteName="Chat"
+      tabBar={props => <LiquidTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         lazy: false,
         freezeOnBlur: false,
         sceneContainerStyle: { backgroundColor: theme.background },
-        tabBarStyle: {
-          backgroundColor: theme.tabBar,
-          borderTopColor: theme.tabBarBorder,
-          borderTopWidth: 1,
-        },
-        tabBarActiveTintColor: theme.primary,
-        tabBarInactiveTintColor: theme.textSecondary,
-        tabBarLabelStyle: { fontSize: 12, fontFamily: 'System', fontWeight: '500' },
       }}
     >
+      <Tab.Screen
+        name="Tarefas"
+        component={TasksScreen}
+        options={{
+          tabBarLabel: 'Tarefas',
+          tabBarIcon: ({ color }) => (
+            <Image
+              source={require('../../assets/task.png')}
+              style={{ width: 22, height: 22, tintColor: color }}
+            />
+          ),
+        }}
+      />
       <Tab.Screen
         name="Chat"
         component={ChatScreen}
