@@ -9,6 +9,8 @@ O projeto existe em duas versões:
 | **Telegram Bot** | Cliente do backend do app — mesma IA, recorrência e banco | python-telegram-bot + httpx |
 | **App iOS** | Versão atual em desenvolvimento | React Native + FastAPI + Gemini AI + SQLite |
 
+Além dos lembretes por IA, o app iOS tem uma aba de **Tarefas** semanais — com prioridades, anotações, conclusão e reordenação por arraste (dentro da mesma prioridade) — e integração cruzada: segure uma tarefa para criar um lembrete, ou um lembrete para criar uma tarefa.
+
 ---
 
 ## Sumário
@@ -462,6 +464,50 @@ Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo 
 
 ---
 
+### Tarefas
+
+Tarefas semanais por usuário. Cada tarefa pertence a uma semana (`week_key` no formato ISO `"AAAA-Www"`) e tem prioridade (`high` / `medium` / `low`), anotações e estado de conclusão. Tarefas pendentes "rolam" (carry-over) para as semanas seguintes até serem concluídas.
+
+#### `GET /tasks?week=2026-W26` — Listar tarefas da semana
+
+Inclui o carry-over de pendentes. Ordenação: não-concluídas primeiro, depois por prioridade e por ordem manual (`order_index`).
+
+**Response 200:**
+```json
+{
+  "tasks": [
+    {
+      "id": "tsk_01HABC...",
+      "name": "Limpar itens brechó",
+      "priority": "high",
+      "notes": null,
+      "completed": false,
+      "week_key": "2026-W26",
+      "completed_week_key": null,
+      "order_index": 0,
+      "created_at": "2026-06-22T22:00:00Z"
+    }
+  ]
+}
+```
+
+#### `POST /tasks` — Criar tarefa
+
+**Request:**
+```json
+{ "name": "Limpar itens brechó", "priority": "medium", "notes": null, "week_key": "2026-W26" }
+```
+
+#### `PATCH /tasks/{id}` — Editar tarefa
+
+Campos opcionais: `name`, `priority`, `notes`, `completed`, `week_key` (semana de referência usada ao concluir, p/ o carry-over) e `order_index` (ordenação manual dentro da prioridade).
+
+#### `DELETE /tasks/{id}` — Excluir tarefa
+
+**Response 200:** `{ "id": "tsk_01HABC...", "deleted": true }`
+
+---
+
 ### Push Notifications
 
 > Scaffolding — o **envio** de push é fase 2. Por enquanto a API só registra o token do dispositivo.
@@ -554,6 +600,19 @@ push_tokens               # scaffolding (envio = fase 2)
   ├── user_id (FK → users)
   ├── token (unique)
   ├── platform (ios | android)
+  ├── created_at
+  └── updated_at
+
+tasks
+  ├── id (PK)
+  ├── user_id (FK → users)
+  ├── name
+  ├── priority              # high | medium | low
+  ├── notes
+  ├── completed
+  ├── week_key              # "AAAA-Www" — semana de origem
+  ├── completed_week_key    # semana de conclusão (habilita o carry-over)
+  ├── order_index           # ordenação manual dentro da prioridade
   ├── created_at
   └── updated_at
 ```
@@ -662,9 +721,10 @@ quase_nada_lembretes/
     │       │   ├── auth/      # Registro e login
     │       │   ├── messages/  # Chat com a IA
     │       │   ├── reminders/ # CRUD de lembretes (incl. recorrência por dias da semana)
+    │       │   ├── tasks/     # CRUD de tarefas semanais (carry-over, prioridades, ordem)
     │       │   └── push/      # Registro de tokens de push (scaffolding)
     │       ├── middleware/    # Tratamento global de erros
-    │       └── models/        # Modelos SQLAlchemy (User, Reminder, ChatHistory, PushToken)
+    │       └── models/        # Modelos SQLAlchemy (User, Reminder, Task, ChatHistory, PushToken)
     │
     └── frontend/
         ├── index.js           # Ponto de entrada (registra o root component)
@@ -677,7 +737,7 @@ quase_nada_lembretes/
             ├── context/       # AuthContext, NotificationSettingsContext, ThemeContext
             ├── lib/           # storage MMKV (instância única, sem ciclo de import)
             ├── navigation/    # AppNavigator (rotas)
-            ├── screens/       # Chat, Lembretes, Login, Register, NotificationSettings
+            ├── screens/       # Chat, Tarefas, Lembretes, Login, Register, NotificationSettings
             ├── services/      # Notificações, fila de mensagens e tarefas em background
             └── utils/         # Formatação de hora (12h/24h)
 ```
