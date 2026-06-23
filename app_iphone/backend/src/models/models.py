@@ -19,6 +19,7 @@ class User(Base):
     chat_history = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     push_tokens = relationship("PushToken", back_populates="user", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (Index("idx_users_email", "email"),)
 
@@ -101,4 +102,33 @@ class RefreshToken(Base):
     __table_args__ = (
         Index("idx_refresh_tokens_token_hash", "token_hash"),
         Index("idx_refresh_tokens_user_id", "user_id"),
+    )
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    # high | medium | low
+    priority = Column(String, nullable=False, default="medium")
+    notes = Column(Text, nullable=True)
+    completed = Column(Integer, nullable=False, default=0)
+    # Chave ISO da semana, ex: "2026-W25" — semana de origem da tarefa.
+    week_key = Column(String, nullable=False)
+    # Semana em que foi concluída — habilita o carry-over (tarefa pendente "rola"
+    # para as semanas seguintes até ser marcada como concluída).
+    completed_week_key = Column(String, nullable=True)
+    # Posição manual dentro do grupo de mesma prioridade (drag-reorder).
+    # NULL = ordem padrão (por created_at).
+    order_index = Column(Integer, nullable=True)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+    user = relationship("User", back_populates="tasks")
+
+    __table_args__ = (
+        Index("idx_tasks_user_id", "user_id"),
+        Index("idx_tasks_user_week", "user_id", "week_key"),
     )

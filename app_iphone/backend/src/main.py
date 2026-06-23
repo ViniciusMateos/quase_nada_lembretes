@@ -21,6 +21,7 @@ from src.features.auth.router import router as auth_router
 from src.features.messages.router import router as messages_router
 from src.features.reminders.router import router as reminders_router
 from src.features.push.router import router as push_router
+from src.features.tasks.router import router as tasks_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,6 +105,33 @@ async def _run_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id)"
         ))
 
+        # Tarefas (feature tasks) — cria a tabela e índices se ainda não existirem.
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS tasks ("
+            "id TEXT PRIMARY KEY, "
+            "user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+            "name TEXT NOT NULL, "
+            "priority TEXT NOT NULL DEFAULT 'medium', "
+            "notes TEXT, "
+            "completed INTEGER NOT NULL DEFAULT 0, "
+            "week_key TEXT NOT NULL, "
+            "completed_week_key TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_user_week ON tasks(user_id, week_key)"
+        ))
+        # Coluna de ordenação manual (drag-reorder) — adiciona se a tabela já
+        # existia sem ela.
+        result = await conn.execute(text("PRAGMA table_info(tasks)"))
+        task_columns = {row[1] for row in result.fetchall()}
+        if "order_index" not in task_columns:
+            await conn.execute(text("ALTER TABLE tasks ADD COLUMN order_index INTEGER"))
+            logger.info("Migração: coluna tasks.order_index adicionada.")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -154,6 +182,7 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(messages_router, prefix=API_PREFIX)
 app.include_router(reminders_router, prefix=API_PREFIX)
 app.include_router(push_router, prefix=API_PREFIX)
+app.include_router(tasks_router, prefix=API_PREFIX)
 
 
 @app.get("/health", tags=["health"])

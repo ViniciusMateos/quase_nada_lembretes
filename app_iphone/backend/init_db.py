@@ -100,6 +100,22 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id                  TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    priority            TEXT NOT NULL DEFAULT 'medium',
+    notes               TEXT,
+    completed           INTEGER NOT NULL DEFAULT 0,
+    week_key            TEXT NOT NULL,
+    completed_week_key  TEXT,
+    order_index         INTEGER,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_week ON tasks(user_id, week_key);
 """
 
 
