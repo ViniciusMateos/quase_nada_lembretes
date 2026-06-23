@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import PressableScale from './PressableScale';
@@ -12,22 +12,31 @@ export default function ActionSheet({ visible, options = [], onCancel, anchorPos
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const fade = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.82)).current;
+  const [rendered, setRendered] = useState(visible);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fade, {
-        toValue: visible ? 1 : 0,
-        duration: visible ? 140 : 90,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scale, {
-        toValue: visible ? 1 : 0.82,
-        useNativeDriver: true,
-        tension: 220,
-        friction: 18,
-      }),
-    ]).start();
-  }, [fade, scale, visible]);
+    if (visible) {
+      setRendered(true);
+      fade.setValue(0);
+      scale.setValue(0.82);
+      Animated.parallel([
+        Animated.timing(fade, { toValue: 1, duration: 160, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 150, friction: 11 }),
+      ]).start();
+    } else if (rendered) {
+      Animated.parallel([
+        Animated.timing(fade, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 0.86, duration: 150, useNativeDriver: true }),
+      ]).start(({ finished }) => { if (finished) setRendered(false); });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  // Mantém a última âncora durante a animação de saída — o pai zera o
+  // anchorPosition ao cancelar, o que faria o menu pular pro centro e piscar.
+  const anchorRef = useRef(null);
+  if (anchorPosition) anchorRef.current = anchorPosition;
+  const anchor = anchorRef.current;
 
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
   const menuHeight = options.length * ITEM_HEIGHT;
@@ -35,8 +44,8 @@ export default function ActionSheet({ visible, options = [], onCancel, anchorPos
   let top = screenHeight / 2 - menuHeight / 2;
   let left = screenWidth / 2 - MENU_WIDTH / 2;
 
-  if (anchorPosition) {
-    const { pageX, pageY } = anchorPosition;
+  if (anchor) {
+    const { pageX, pageY } = anchor;
     top = pageY + menuHeight + MARGIN * 2 > screenHeight
       ? Math.max(MARGIN, pageY - menuHeight - MARGIN)
       : pageY + MARGIN;
@@ -46,7 +55,7 @@ export default function ActionSheet({ visible, options = [], onCancel, anchorPos
   }
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
+    <Modal visible={rendered} transparent animationType="none" onRequestClose={onCancel}>
       <Animated.View style={[styles.overlay, { opacity: fade }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
         <Animated.View

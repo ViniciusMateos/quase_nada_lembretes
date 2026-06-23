@@ -24,14 +24,19 @@ import {
 import CalendarPicker from '../components/CalendarPicker';
 import TimePickerNative from '../components/TimePickerNative';
 import { detectIs12h } from '../utils/timeFormat';
+import { formatTodayLabel, getWeekKey } from '../utils/dateUtils';
+import { tabPos, animateTabTo } from '../utils/tabSwipe';
+import { useTabBarClearance } from '../components/LiquidTabBar';
 import { useFocusEffect } from '@react-navigation/native';
+import useFocusEntrance from '../hooks/useFocusEntrance';
 import { listReminders, deleteReminder, syncReminders, updateReminder } from '../api/reminders.api';
 import { scheduleFromSync } from '../services/notifications';
 import { useTheme } from '../context/ThemeContext';
 import LoadingDog from '../components/LoadingDog';
 import ConfirmDialog from '../components/ConfirmDialog';
 import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
-import ActionSheet from '../components/ActionSheet';
+import TaskModal from '../components/TaskModal';
+import { createTask } from '../api/tasks.api';
 import PressableScale from '../components/PressableScale';
 
 const IS_12H = detectIs12h();
@@ -193,6 +198,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const [kbHeight, setKbHeight] = useState(0);
   const styles = useMemo(() => makeModalStyles(theme), [theme]);
   const needsDate = TYPES_WITH_DATE.has(recurrence);
 
@@ -249,9 +255,11 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   useEffect(() => {
     if (!visible) return;
     const show = Keyboard.addListener('keyboardWillShow', e => {
+      setKbHeight(e.endCoordinates.height);
       Animated.timing(keyboardOffset, { toValue: -e.endCoordinates.height, duration: e.duration || 250, useNativeDriver: true }).start();
     });
     const hide = Keyboard.addListener('keyboardWillHide', e => {
+      setKbHeight(0);
       Animated.timing(keyboardOffset, { toValue: 0, duration: e.duration || 250, useNativeDriver: true }).start();
     });
     return () => { show.remove(); hide.remove(); };
@@ -333,7 +341,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
+        <Animated.View style={[styles.sheet, kbHeight > 0 && { maxHeight: Dimensions.get('window').height - kbHeight - 70 }, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
           <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
           </View>
@@ -535,35 +543,50 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   );
 }
 
-function ReminderItem({ reminder, onEdit, onDelete, onLongPress, theme }) {
+function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
   const styles = useMemo(() => makeItemStyles(theme), [theme]);
   const pressAnim = useRef(new Animated.Value(1)).current;
-  const [isHolding, setIsHolding] = useState(false);
+  const hintAnim = useRef(new Animated.Value(0)).current;
+  const [holding, setHolding] = useState(false);
+  const armedRef = useRef(false);
 
   const animatePress = toValue => {
-    Animated.spring(pressAnim, {
-      toValue,
-      useNativeDriver: true,
-      tension: 120,
-      friction: 7,
-    }).start();
+    Animated.spring(pressAnim, { toValue, useNativeDriver: true, tension: 120, friction: 7 }).start();
   };
+
+  useEffect(() => {
+    if (holding) {
+      hintAnim.setValue(0);
+      Animated.spring(hintAnim, { toValue: 1, useNativeDriver: true, tension: 200, friction: 11 }).start();
+    }
+  }, [holding, hintAnim]);
+
   return (
     <Animated.View style={{ transform: [{ scale: pressAnim }] }}>
+    {holding && (
+      <Animated.View
+        style={[styles.hintBalloon, { opacity: hintAnim, transform: [{ scale: hintAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }, { translateY: hintAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}
+        pointerEvents="none"
+      >
+        <Text style={styles.hintBalloonText}>Soltar para criar tarefa</Text>
+      </Animated.View>
+    )}
     <Pressable
-      style={[styles.item, isHolding && styles.itemHolding]}
+      style={[styles.item, holding && styles.itemHolding]}
       onPress={() => onEdit(reminder)}
-      onPressIn={() => animatePress(0.985)}
+      onPressIn={() => { armedRef.current = false; animatePress(0.985); }}
       onPressOut={() => {
-        setIsHolding(false);
         animatePress(1);
+        if (armedRef.current) {
+          armedRef.current = false;
+          setHolding(false);
+          onCreateTask(reminder);
+        } else {
+          setHolding(false);
+        }
       }}
-      onLongPress={event => {
-        setIsHolding(true);
-        animatePress(1.02);
-        onLongPress(reminder, event);
-      }}
-      delayLongPress={350}
+      onLongPress={() => { armedRef.current = true; setHolding(true); animatePress(1.03); }}
+      delayLongPress={300}
     >
       <View style={styles.itemContent}>
         <Text style={styles.itemTitle}>{reminder.title}</Text>
@@ -589,6 +612,8 @@ function ReminderItem({ reminder, onEdit, onDelete, onLongPress, theme }) {
 export default function RemindersScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const tabClear = useTabBarClearance();
+  const entrance = useFocusEntrance(2);
 
   const [reminders, setReminders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -596,8 +621,7 @@ export default function RemindersScreen({ navigation }) {
   const [error, setError] = useState(null);
   const [editingReminder, setEditingReminder] = useState(null);
   const [deletingReminder, setDeletingReminder] = useState(null);
-  const [actionReminder, setActionReminder] = useState(null);
-  const [actionAnchor, setActionAnchor] = useState(null);
+  const [taskDraftName, setTaskDraftName] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
   const hasLoadedRemindersRef = useRef(false);
@@ -615,6 +639,7 @@ export default function RemindersScreen({ navigation }) {
       onPanResponderMove: (_, g) => {
         if (g.dx > 0) {
           swipeTranslateX.setValue(Math.min(g.dx, screenWidth));
+          tabPos.setValue(2 + Math.max(-g.dx / screenWidth, -1)); // Lembretes(2) → Chat(1)
         }
       },
       onPanResponderRelease: (_, g) => {
@@ -627,6 +652,7 @@ export default function RemindersScreen({ navigation }) {
             swipeTranslateX.setValue(0);
             navigation.navigate('Chat');
           });
+          animateTabTo(1);
           return;
         }
 
@@ -635,6 +661,7 @@ export default function RemindersScreen({ navigation }) {
           useNativeDriver: true,
           bounciness: 0,
         }).start();
+        animateTabTo(2);
       },
       onPanResponderTerminate: () => {
         Animated.spring(swipeTranslateX, {
@@ -642,6 +669,7 @@ export default function RemindersScreen({ navigation }) {
           useNativeDriver: true,
           bounciness: 0,
         }).start();
+        animateTabTo(2);
       },
     }),
   ).current;
@@ -671,8 +699,8 @@ export default function RemindersScreen({ navigation }) {
   // Mantém a guarda do swipe sincronizada: qualquer overlay aberto trava a
   // navegação por gesto horizontal da página.
   useEffect(() => {
-    overlayOpenRef.current = !!(editingReminder || deletingReminder || actionReminder);
-  }, [editingReminder, deletingReminder, actionReminder]);
+    overlayOpenRef.current = !!(editingReminder || deletingReminder || taskDraftName || menuVisible);
+  }, [editingReminder, deletingReminder, taskDraftName, menuVisible]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -683,23 +711,20 @@ export default function RemindersScreen({ navigation }) {
     setDeletingReminder(reminder);
   };
 
-  const handleReminderAction = (reminder, event) => {
-    setActionReminder(reminder);
-    if (event) {
-      setActionAnchor({ pageX: event.nativeEvent.pageX, pageY: event.nativeEvent.pageY });
+  const handleCreateTask = reminder => {
+    setTaskDraftName(reminder.title);
+  };
+
+  const handleCreateTaskFromReminder = async ({ name, priority, notes }) => {
+    try {
+      await createTask({ name, priority, notes, week_key: getWeekKey(new Date()) });
+    } catch (err) {
+      Alert.alert('Erro', 'Não foi possível criar a tarefa.');
+      console.warn('[RemindersScreen] criar tarefa:', err);
+      return;
     }
-  };
-
-  const handleActionEdit = () => {
-    const reminder = actionReminder;
-    setActionReminder(null);
-    if (reminder) setEditingReminder(reminder);
-  };
-
-  const handleActionDelete = () => {
-    const reminder = actionReminder;
-    setActionReminder(null);
-    if (reminder) setDeletingReminder(reminder);
+    setTaskDraftName(null);
+    Alert.alert('Pronto', 'Tarefa criada a partir do lembrete!');
   };
 
   const confirmDelete = async () => {
@@ -707,13 +732,15 @@ export default function RemindersScreen({ navigation }) {
     if (!reminder) return;
 
     setDeletingReminder(null);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setReminders(prev => prev.filter(r => r.id !== reminder.id));
     try {
       await deleteReminder(reminder.id);
-      setReminders(prev => prev.filter(r => r.id !== reminder.id));
       const syncData = await syncReminders();
       await scheduleFromSync(syncData);
     } catch (err) {
       Alert.alert('Erro', 'Não foi possível deletar o lembrete.');
+      fetchReminders(true); // restaura caso a exclusão tenha falhado
       console.warn('[RemindersScreen] Erro ao deletar:', err);
     }
   };
@@ -773,7 +800,7 @@ export default function RemindersScreen({ navigation }) {
   return (
     <View style={styles.safe}>
     <Animated.View
-      style={[styles.swipePage, { transform: [{ translateX: swipeTranslateX }] }]}
+      style={[styles.swipePage, { opacity: entrance.opacity, transform: [...entrance.transform, { translateX: swipeTranslateX }] }]}
       {...panResponder.panHandlers}
     >
       <SafeAreaView style={{ flex: 1 }}>
@@ -788,9 +815,12 @@ export default function RemindersScreen({ navigation }) {
             <HamburgerIcon />
           </PressableScale>
         </View>
-        {reminders.length > 0 && (
-          <Text style={styles.editHint}>Clique no lembrete para editar</Text>
-        )}
+        <View style={styles.dateBlock}>
+          <Text style={styles.todayDate}>{formatTodayLabel()}</Text>
+          {reminders.length > 0 && (
+            <Text style={styles.editHint}>Clique para editar · segure para criar tarefa</Text>
+          )}
+        </View>
         <View style={styles.listWrap}>
           {isRefreshing && (
             <View style={styles.refreshOverlay} pointerEvents="none">
@@ -809,12 +839,12 @@ export default function RemindersScreen({ navigation }) {
                   reminder={item.reminder}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
-                  onLongPress={handleReminderAction}
+                  onCreateTask={handleCreateTask}
                   theme={theme}
                 />
               );
             }}
-            contentContainerStyle={sections.length === 0 ? styles.emptyContainer : styles.listContent}
+            contentContainerStyle={[sections.length === 0 ? styles.emptyContainer : styles.listContent, { paddingBottom: tabClear }]}
             showsVerticalScrollIndicator={false}
             refreshControl={
               <RefreshControl
@@ -850,14 +880,13 @@ export default function RemindersScreen({ navigation }) {
           onCancel={() => setDeletingReminder(null)}
           onConfirm={confirmDelete}
         />
-        <ActionSheet
-          visible={!!actionReminder}
-          anchorPosition={actionAnchor}
-          options={[
-            { label: 'Editar', onPress: handleActionEdit },
-            { label: 'Excluir', destructive: true, onPress: handleActionDelete },
-          ]}
-          onCancel={() => { setActionReminder(null); setActionAnchor(null); }}
+        <TaskModal
+          visible={!!taskDraftName}
+          task={null}
+          initialName={taskDraftName}
+          onSave={handleCreateTaskFromReminder}
+          onClose={() => setTaskDraftName(null)}
+          theme={theme}
         />
         <HamburgerMenu
           visible={menuVisible}
@@ -888,6 +917,17 @@ function makeStyles(theme) {
       fontWeight: '600',
       color: theme.textPrimary,
       fontFamily: 'System',
+    },
+    dateBlock: {
+      alignItems: 'center',
+      paddingTop: 10,
+    },
+    todayDate: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+      textAlign: 'center',
     },
     editHint: {
       fontSize: 12,
@@ -995,6 +1035,22 @@ function makeItemStyles(theme) {
     },
     deleteButton: { marginLeft: 12, padding: 4 },
     deleteButtonText: { fontSize: 16, color: theme.textSecondary },
+    hintBalloon: {
+      position: 'absolute',
+      top: -12,
+      alignSelf: 'center',
+      backgroundColor: theme.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 14,
+      zIndex: 30,
+      shadowColor: theme.primary,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.5,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    hintBalloonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', fontFamily: 'System' },
   });
 }
 

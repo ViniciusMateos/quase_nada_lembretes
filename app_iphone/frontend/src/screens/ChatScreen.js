@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   SafeAreaView,
   Text,
@@ -21,6 +22,8 @@ import { deleteReminder, syncReminders, listReminders } from '../api/reminders.a
 import { requestPermission, scheduleFromSync, displayLocalNotification } from '../services/notifications';
 import { enqueueMessage, drainQueue } from '../services/messageQueue';
 import { detectIs12h } from '../utils/timeFormat';
+import { formatTodayLabel } from '../utils/dateUtils';
+import { tabPos, animateTabTo } from '../utils/tabSwipe';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import MessageBubble from '../components/MessageBubble';
@@ -66,7 +69,9 @@ export default function ChatScreen({ navigation }) {
   const { user } = useAuth();
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const entranceStyle = useFocusEntrance();
+  const [kbOpen, setKbOpen] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
+  const entranceStyle = useFocusEntrance(1);
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
@@ -81,9 +86,10 @@ export default function ChatScreen({ navigation }) {
         Math.abs(g.dx) > Math.abs(g.dy) * 2 &&
         Math.abs(g.dx) > 20,
       onPanResponderMove: (_, g) => {
-        if (g.dx < 0) {
-          swipeTranslateX.setValue(Math.max(g.dx, -screenWidth));
-        }
+        // Permite arrastar nos dois sentidos: ← Lembretes (dir) e → Tarefas (esq).
+        swipeTranslateX.setValue(Math.max(Math.min(g.dx, screenWidth), -screenWidth));
+        // Pílula do footer acompanha o dedo (Chat = índice 1).
+        tabPos.setValue(1 + Math.max(Math.min(-g.dx / screenWidth, 1), -1));
       },
       onPanResponderRelease: (_, g) => {
         if (g.dx < -80) {
@@ -95,6 +101,19 @@ export default function ChatScreen({ navigation }) {
             swipeTranslateX.setValue(0);
             navigation.navigate('Lembretes');
           });
+          animateTabTo(2);
+          return;
+        }
+        if (g.dx > 80) {
+          Animated.timing(swipeTranslateX, {
+            toValue: screenWidth,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            swipeTranslateX.setValue(0);
+            navigation.navigate('Tarefas');
+          });
+          animateTabTo(0);
           return;
         }
 
@@ -103,6 +122,7 @@ export default function ChatScreen({ navigation }) {
           useNativeDriver: true,
           bounciness: 0,
         }).start();
+        animateTabTo(1);
       },
       onPanResponderTerminate: () => {
         Animated.spring(swipeTranslateX, {
@@ -110,6 +130,7 @@ export default function ChatScreen({ navigation }) {
           useNativeDriver: true,
           bounciness: 0,
         }).start();
+        animateTabTo(1);
       },
     }),
   ).current;
@@ -253,6 +274,14 @@ export default function ChatScreen({ navigation }) {
       useNativeDriver: true,
     }).start();
   }, [canSend, sendButtonAnim]);
+
+  // Com a tab bar flutuante, o input fica acima dela; ao abrir o teclado, some
+  // o respiro pra não criar buraco entre input e teclado.
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () => setKbOpen(true));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKbOpen(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   const handleSend = async overrideContent => {
     const useOverride = typeof overrideContent === 'string';
@@ -433,6 +462,9 @@ export default function ChatScreen({ navigation }) {
           style={[styles.headerLogo, { tintColor: theme.isDark ? '#FFFFFF' : '#1A1A2E' }]}
           resizeMode="contain"
         />
+        <View pointerEvents="none" style={styles.headerCenter}>
+          <Text style={styles.headerDate}>{formatTodayLabel()}</Text>
+        </View>
         <PressableScale
           onPress={() => setMenuVisible(true)}
           hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}
@@ -474,10 +506,10 @@ export default function ChatScreen({ navigation }) {
           </View>
         ) : null}
 
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, { marginBottom: kbOpen ? 0 : 68 }]}>
           <TextInput
             ref={inputRef}
-            style={styles.textInput}
+            style={[styles.textInput, inputFocused && styles.textInputFocused]}
             placeholder="Digite uma mensagem..."
             placeholderTextColor={theme.textPlaceholder}
             value={inputText}
@@ -487,8 +519,8 @@ export default function ChatScreen({ navigation }) {
             returnKeyType="send"
             enablesReturnKeyAutomatically
             onSubmitEditing={() => handleSend()}
-            onFocus={() => { isInputFocusedRef.current = true; }}
-            onBlur={() => { isInputFocusedRef.current = false; }}
+            onFocus={() => { isInputFocusedRef.current = true; setInputFocused(true); }}
+            onBlur={() => { isInputFocusedRef.current = false; setInputFocused(false); }}
             contextMenuHidden={false}
             accessibilityLabel="Campo de mensagem"
           />
@@ -597,6 +629,21 @@ function makeStyles(theme) {
       width: 30,
       height: 30,
     },
+    headerCenter: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerDate: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textSecondary,
+      fontFamily: 'System',
+    },
     clarifyRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -643,6 +690,9 @@ function makeStyles(theme) {
       fontFamily: 'System',
       maxHeight: 120,
       minHeight: 44,
+    },
+    textInputFocused: {
+      borderColor: theme.primary,
     },
     sendButton: {
       width: 44,

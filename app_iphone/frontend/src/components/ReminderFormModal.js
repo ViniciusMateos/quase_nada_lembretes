@@ -1,0 +1,501 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  Keyboard,
+  LayoutAnimation,
+  Modal,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import CalendarPicker from './CalendarPicker';
+import TimePickerNative from './TimePickerNative';
+import LoadingDog from './LoadingDog';
+import PressableScale from './PressableScale';
+import { detectIs12h } from '../utils/timeFormat';
+
+const IS_12H = detectIs12h();
+
+function AnimatedExpand({ visible, children, expandedHeight = 400 }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      mountedRef.current = true;
+      setMounted(true);
+      progress.setValue(0);
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 360,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else if (mountedRef.current) {
+      Animated.timing(progress, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) {
+          mountedRef.current = false;
+          setMounted(false);
+        }
+      });
+    }
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!mounted) return null;
+
+  return (
+    <Animated.View
+      style={{
+        maxHeight: progress.interpolate({ inputRange: [0, 1], outputRange: [0, expandedHeight] }),
+        opacity: progress,
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+function formatDateLabel(date) {
+  if (!date) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'America/Sao_Paulo',
+  }).format(date);
+}
+
+function isoToPickerTime(isoString) {
+  if (!isoString) return { hours: 9, minutes: 0, period: 'AM' };
+  const d = new Date(isoString);
+  const rawHours = d.getHours();
+  const minutes = d.getMinutes();
+  if (!IS_12H) return { hours: rawHours, minutes, period: 'AM' };
+  const period = rawHours >= 12 ? 'PM' : 'AM';
+  const hours = rawHours % 12 || 12;
+  return { hours, minutes, period };
+}
+
+function pickerTimeToDate(baseDate, pickerTime) {
+  const d = new Date(baseDate);
+  let hours = pickerTime.hours;
+  if (IS_12H) {
+    if (pickerTime.period === 'PM' && hours !== 12) hours += 12;
+    if (pickerTime.period === 'AM' && hours === 12) hours = 0;
+  }
+  d.setHours(hours, pickerTime.minutes, 0, 0);
+  return d;
+}
+
+const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const DAY_PRESETS = [
+  { label: 'Dias úteis', days: [0, 1, 2, 3, 4] },
+  { label: 'Fim de semana', days: [5, 6] },
+  { label: 'Todo dia', days: [0, 1, 2, 3, 4, 5, 6] },
+];
+
+const RECURRENCE_TYPES = [
+  { key: 'once', label: 'Único' },
+  { key: 'daily', label: 'Todo dia' },
+  { key: 'weekly_days', label: 'Dias da semana' },
+  { key: 'weekly', label: 'Toda semana' },
+  { key: 'monthly', label: 'Todo mês' },
+  { key: 'interval_seconds', label: 'Intervalo' },
+];
+
+const TYPES_WITH_DATE = new Set(['once', 'weekly', 'monthly']);
+
+const SECTOR_TINTS = { type: '#FF8234', preset: '#F4663A', day: '#F59E3C' };
+
+function sameDays(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
+function intervalFromSeconds(seconds) {
+  if (!seconds || seconds <= 0) return { value: '1', unit: 'days' };
+  if (seconds % 86400 === 0) return { value: String(seconds / 86400), unit: 'days' };
+  if (seconds % 3600 === 0) return { value: String(seconds / 3600), unit: 'hours' };
+  return { value: String(Math.max(1, Math.round(seconds / 3600))), unit: 'hours' };
+}
+
+/**
+ * Modal de formulário de lembrete (criar/editar). Constrói o payload e chama
+ * `onSave(payload)` — quem cria/atualiza é o pai (que conhece o id, se houver).
+ * `reminder` é o objeto inicial (para criar, passe { title, recurrence, next_execution }).
+ */
+export default function ReminderFormModal({ visible, reminder, onSave, onClose, theme, isNew = false }) {
+  const [title, setTitle] = useState('');
+  const [recurrence, setRecurrence] = useState('once');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDays, setSelectedDays] = useState([]);
+  const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
+  const [intervalValue, setIntervalValue] = useState('1');
+  const [intervalUnit, setIntervalUnit] = useState('days');
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [kbHeight, setKbHeight] = useState(0);
+  const styles = useMemo(() => makeModalStyles(theme), [theme]);
+  const needsDate = TYPES_WITH_DATE.has(recurrence);
+
+  const sheetTranslateY = useRef(new Animated.Value(400)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const keyboardOffset = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 3,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) sheetTranslateY.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 60 || g.vy > 0.5) {
+          Keyboard.dismiss();
+          keyboardOffset.setValue(0);
+          Animated.timing(sheetTranslateY, { toValue: 500, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+        } else {
+          Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+        }
+      },
+    }),
+  ).current;
+
+  useEffect(() => {
+    if (visible && reminder) {
+      setTitle(reminder.title || '');
+      setRecurrence(reminder.recurrence || 'once');
+      const d = reminder.next_execution ? new Date(reminder.next_execution) : new Date();
+      setSelectedDate(d);
+      setSelectedDays(Array.isArray(reminder.days_of_week) ? reminder.days_of_week : []);
+      setPickerTime(isoToPickerTime(reminder.next_execution));
+      const iv = intervalFromSeconds(reminder.interval_seconds);
+      setIntervalValue(iv.value);
+      setIntervalUnit(iv.unit);
+      setErrors({});
+      setCalendarVisible(false);
+      setTimePickerVisible(false);
+      sheetTranslateY.setValue(400);
+      overlayOpacity.setValue(0);
+      keyboardOffset.setValue(0);
+      Animated.parallel([
+        Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, tension: 68, friction: 11 }),
+      ]).start();
+    }
+  }, [visible, reminder, sheetTranslateY, overlayOpacity, keyboardOffset]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const show = Keyboard.addListener('keyboardWillShow', e => {
+      setKbHeight(e.endCoordinates.height);
+      Animated.timing(keyboardOffset, { toValue: -e.endCoordinates.height, duration: e.duration || 250, useNativeDriver: true }).start();
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', e => {
+      setKbHeight(0);
+      Animated.timing(keyboardOffset, { toValue: 0, duration: e.duration || 250, useNativeDriver: true }).start();
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [visible, keyboardOffset]);
+
+  const handleClose = () => {
+    Keyboard.dismiss();
+    keyboardOffset.setValue(0);
+    Animated.parallel([
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(sheetTranslateY, { toValue: 400, duration: 220, useNativeDriver: true }),
+    ]).start(onClose);
+  };
+
+  const toggleCalendar = () => {
+    setCalendarVisible(v => !v);
+    if (timePickerVisible) setTimePickerVisible(false);
+  };
+
+  const toggleTimePicker = () => {
+    setTimePickerVisible(v => !v);
+    if (calendarVisible) setCalendarVisible(false);
+  };
+
+  const handleDaySelect = day => {
+    setSelectedDate(day);
+    setCalendarVisible(false);
+    if (errors.datetime) setErrors(e => ({ ...e, datetime: null }));
+  };
+
+  const toggleDay = day => {
+    setSelectedDays(prev => (prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]));
+    if (errors.days) setErrors(e => ({ ...e, days: null }));
+  };
+
+  const handleSave = async () => {
+    const newErrors = {};
+    if (!title.trim()) newErrors.title = 'Título é obrigatório';
+    if (recurrence === 'weekly_days' && selectedDays.length === 0) newErrors.days = 'Selecione ao menos um dia';
+    if (needsDate && !selectedDate) newErrors.datetime = 'Selecione uma data';
+    let intervalSeconds = null;
+    if (recurrence === 'interval_seconds') {
+      const n = parseInt(intervalValue, 10);
+      if (!n || n <= 0) newErrors.interval = 'Informe um intervalo válido';
+      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : 3600);
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const baseDate = (needsDate ? selectedDate : new Date()) || new Date();
+      const finalDate = pickerTimeToDate(baseDate, pickerTime);
+      const payload = { title: title.trim(), scheduled_time: finalDate.toISOString(), recurrence };
+      if (recurrence === 'weekly_days') payload.days_of_week = [...selectedDays].sort((a, b) => a - b);
+      if (recurrence === 'interval_seconds') payload.interval_seconds = intervalSeconds;
+      await onSave(payload);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+      <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
+        <Animated.View style={[styles.sheet, kbHeight > 0 && { maxHeight: Dimensions.get('window').height - kbHeight - 70 }, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
+          <View style={styles.handleArea} {...panResponder.panHandlers}>
+            <View style={styles.handle} />
+          </View>
+
+          <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <Text style={styles.sheetTitle}>{isNew ? 'Novo lembrete' : 'Editar lembrete'}</Text>
+
+            <Text style={styles.label}>Título</Text>
+            <TextInput
+              style={[styles.input, errors.title && styles.inputError]}
+              value={title}
+              onChangeText={text => { setTitle(text); if (errors.title) setErrors(e => ({ ...e, title: null })); }}
+              placeholder="Nome do lembrete"
+              placeholderTextColor={theme.textPlaceholder}
+              autoCapitalize="sentences"
+              editable={!isSaving}
+            />
+            {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
+
+            <Text style={styles.label}>Recorrência</Text>
+            <View style={styles.typeScrollWrap}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow} keyboardShouldPersistTaps="handled">
+                {RECURRENCE_TYPES.map(t => {
+                  const active = recurrence === t.key;
+                  return (
+                    <PressableScale
+                      key={t.key}
+                      style={[styles.typeChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
+                      onPress={() => {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        setRecurrence(t.key);
+                        setCalendarVisible(false);
+                        setErrors(e => ({ ...e, days: null, datetime: null, interval: null }));
+                      }}
+                      disabled={isSaving}
+                    >
+                      <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{t.label}</Text>
+                    </PressableScale>
+                  );
+                })}
+              </ScrollView>
+              <View pointerEvents="none" style={styles.typeScrollFade}>
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '00', width: 6 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '33', width: 6 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + '80', width: 8 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface + 'CC', width: 8 }]} />
+                <View style={[styles.typeFadeBand, { backgroundColor: theme.surface, width: 6 }]} />
+              </View>
+            </View>
+
+            {recurrence === 'weekly_days' && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>Dias da semana</Text>
+                <View style={styles.presetRow}>
+                  {DAY_PRESETS.map(p => {
+                    const active = sameDays(selectedDays, p.days);
+                    return (
+                      <PressableScale
+                        key={p.label}
+                        style={[styles.preset, active && { backgroundColor: SECTOR_TINTS.preset, borderColor: SECTOR_TINTS.preset }]}
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setSelectedDays(p.days);
+                          if (errors.days) setErrors(e => ({ ...e, days: null }));
+                        }}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.presetText, active && styles.presetTextActive]}>{p.label}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                <View style={styles.pillRow}>
+                  {DAY_LABELS.map((lbl, idx) => {
+                    const on = selectedDays.includes(idx);
+                    return (
+                      <PressableScale
+                        key={idx}
+                        style={[styles.pill, on && { backgroundColor: SECTOR_TINTS.day, borderColor: SECTOR_TINTS.day }]}
+                        onPress={() => toggleDay(idx)}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.pillText, on && styles.pillTextActive]}>{lbl}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {errors.days ? <Text style={styles.fieldError}>{errors.days}</Text> : null}
+              </>
+            )}
+
+            {recurrence === 'interval_seconds' && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>A cada</Text>
+                <View style={styles.intervalRow}>
+                  <TextInput
+                    style={[styles.intervalInput, errors.interval && styles.inputError]}
+                    value={intervalValue}
+                    onChangeText={text => {
+                      setIntervalValue(text.replace(/[^0-9]/g, ''));
+                      if (errors.interval) setErrors(e => ({ ...e, interval: null }));
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    editable={!isSaving}
+                  />
+                  {[{ key: 'hours', label: 'horas' }, { key: 'days', label: 'dias' }].map(u => {
+                    const active = intervalUnit === u.key;
+                    return (
+                      <PressableScale
+                        key={u.key}
+                        style={[styles.unitChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
+                        onPress={() => setIntervalUnit(u.key)}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.unitChipText, active && styles.unitChipTextActive]}>{u.label}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {errors.interval ? <Text style={styles.fieldError}>{errors.interval}</Text> : null}
+              </>
+            )}
+
+            {needsDate && (
+              <>
+                <Text style={[styles.label, { marginTop: 14 }]}>{recurrence === 'once' ? 'Data' : 'A partir de'}</Text>
+                <Pressable
+                  style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
+                  onPress={toggleCalendar}
+                  disabled={isSaving}
+                >
+                  <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
+                    {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
+                  </Text>
+                  <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
+                </Pressable>
+                <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
+                  <CalendarPicker selectedDate={selectedDate} onSelect={handleDaySelect} theme={theme} />
+                </AnimatedExpand>
+              </>
+            )}
+
+            <Text style={[styles.label, { marginTop: 14 }]}>Horário</Text>
+            <Pressable style={[styles.dateButton, timePickerVisible && styles.dateButtonActive]} onPress={toggleTimePicker} disabled={isSaving}>
+              <Text style={styles.dateButtonText}>
+                {IS_12H
+                  ? `${String(pickerTime.hours).padStart(2, '0')}:${String(pickerTime.minutes).padStart(2, '0')} ${pickerTime.period}`
+                  : `${String(pickerTime.hours).padStart(2, '0')}:${String(pickerTime.minutes).padStart(2, '0')}`}
+              </Text>
+              <Text style={[styles.dateChevron, timePickerVisible && styles.dateChevronOpen]}>›</Text>
+            </Pressable>
+            <AnimatedExpand visible={timePickerVisible} expandedHeight={175}>
+              <TimePickerNative value={pickerTime} onChange={setPickerTime} is12h={IS_12H} theme={theme} />
+            </AnimatedExpand>
+            {errors.datetime ? <Text style={styles.fieldError}>{errors.datetime}</Text> : null}
+
+            <View style={styles.buttons}>
+              <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
+                <Text style={[styles.btnText, styles.btnCancelText]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btn, styles.btnSave]} onPress={handleSave} disabled={isSaving}>
+                {isSaving ? <LoadingDog size={28} color="#FFFFFF" /> : <Text style={[styles.btnText, styles.btnSaveText]}>Salvar</Text>}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+function makeModalStyles(theme) {
+  return StyleSheet.create({
+    overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+    sheet: { backgroundColor: theme.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: Dimensions.get('window').height * 0.88 },
+    handleArea: { paddingTop: 14, paddingBottom: 16, alignItems: 'center' },
+    handle: { width: 48, height: 5, backgroundColor: theme.border, borderRadius: 3 },
+    scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
+    sheetTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, fontFamily: 'System', marginBottom: 20, marginTop: 8 },
+    label: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, fontFamily: 'System', marginBottom: 6 },
+    input: { backgroundColor: theme.surface2, borderWidth: 1, borderColor: theme.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: theme.textPrimary, fontFamily: 'System', marginBottom: 14 },
+    inputError: { borderColor: theme.error },
+    dateButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.surface2, borderWidth: 1, borderColor: theme.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 2 },
+    dateButtonActive: { borderColor: theme.primary },
+    dateButtonText: { fontSize: 15, color: theme.textPrimary, fontFamily: 'System' },
+    dateButtonPlaceholder: { fontSize: 15, color: theme.textPlaceholder, fontFamily: 'System' },
+    dateChevron: { fontSize: 20, color: theme.textSecondary, fontWeight: '600', transform: [{ rotate: '90deg' }] },
+    dateChevronOpen: { transform: [{ rotate: '-90deg' }], color: theme.primary },
+    fieldError: { color: theme.error, fontSize: 12, marginTop: 4, marginBottom: 8, marginLeft: 4, fontFamily: 'System' },
+    presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+    preset: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface2 },
+    presetText: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, fontFamily: 'System' },
+    presetTextActive: { color: '#FFFFFF' },
+    pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+    pill: { minWidth: 46, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface2, alignItems: 'center' },
+    pillText: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, fontFamily: 'System' },
+    pillTextActive: { color: '#FFFFFF' },
+    typeScrollWrap: { position: 'relative' },
+    typeScrollFade: { position: 'absolute', right: 0, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'stretch' },
+    typeFadeBand: { height: '100%' },
+    typeRow: { flexDirection: 'row', gap: 8, paddingVertical: 2, paddingRight: 8 },
+    typeChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface2 },
+    typeChipText: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, fontFamily: 'System' },
+    typeChipTextActive: { color: '#FFFFFF' },
+    intervalRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    intervalInput: { width: 72, backgroundColor: theme.surface2, borderWidth: 1, borderColor: theme.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: theme.textPrimary, fontFamily: 'System', textAlign: 'center' },
+    unitChip: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface2 },
+    unitChipText: { fontSize: 14, fontWeight: '600', color: theme.textSecondary, fontFamily: 'System' },
+    unitChipTextActive: { color: '#FFFFFF' },
+    buttons: { flexDirection: 'row', gap: 12, marginTop: 20 },
+    btn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center', minHeight: 48 },
+    btnCancel: { borderWidth: 1, borderColor: theme.border },
+    btnSave: { backgroundColor: theme.primary },
+    btnText: { fontSize: 15, fontWeight: '600', fontFamily: 'System' },
+    btnCancelText: { color: theme.textSecondary },
+    btnSaveText: { color: '#FFFFFF' },
+  });
+}
