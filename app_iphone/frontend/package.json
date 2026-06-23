@@ -8,6 +8,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
+    "tunnel": "expo start --dev-client --tunnel",
+    "lan": "expo start --dev-client --lan",
     "test": "jest"
   },
   "dependencies": {
@@ -22,7 +24,9 @@
     "expo": "^51.0.39",
     "expo-av": "~14.0.7",
     "expo-background-fetch": "~12.0.1",
+    "expo-blur": "~13.0.3",
     "expo-dev-client": "~4.0.29",
+    "expo-linear-gradient": "~13.0.2",
     "expo-notifications": "~0.28.19",
     "expo-task-manager": "~11.8.2",
     "react": "18.2.0",
