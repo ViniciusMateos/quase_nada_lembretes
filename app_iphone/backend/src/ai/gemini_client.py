@@ -68,9 +68,9 @@ Para CRIAR_LEMBRETE, extraia:
 - titulo: texto descritivo do lembrete (obrigatório)
 - data_hora: data e hora no formato ISO 8601 COM OFFSET do cliente (ex: "2026-04-24T12:00:00-03:00"). Se o usuário mencionar um horário, calcule a data/hora exata. Se não mencionar, use null.
 - recorrencia: OBRIGATÓRIO — escolha UMA das opções abaixo com muito cuidado:
-  * "once" — evento ÚNICO, acontece UMA SÓ VEZ. Use quando: usuário mencionar data/hora específica sem padrão de repetição, ou usar "daqui X minutos/horas", ou usar "hoje", "amanhã", "na próxima semana" sem repetição.
+  * "once" — evento ÚNICO, acontece UMA SÓ VEZ. Use quando: usuário mencionar data/hora específica sem padrão de repetição, ou usar "daqui X minutos/horas", ou usar "hoje", "amanhã", "na próxima semana" sem repetição, OU mencionar UM dia da semana SEM "toda/todas/cada" (ex: "na segunda", "sábado", "quinta que vem") — aí é a PRÓXIMA ocorrência desse dia, evento ÚNICO (NÃO recorrente).
   * "daily" — repete TODO DIA. Use SOMENTE quando o usuário disser explicitamente: "todo dia", "todos os dias", "diariamente", "cada dia".
-  * "weekly" — repete toda semana em UM ÚNICO dia específico. Use SOMENTE quando disser um dia só: "toda segunda", "toda terça", "toda quinta", "semanalmente na quarta".
+  * "weekly" — repete toda semana em UM ÚNICO dia específico. Use SOMENTE quando houver palavra de repetição EXPLÍCITA junto do dia: "toda segunda", "todas as terças", "toda quinta", "semanalmente na quarta". ATENÇÃO: um dia da semana SOZINHO, sem "toda/todas" ("na segunda", "sábado", "sexta que vem"), NÃO é weekly — é "once".
   * "weekly_days" — repete em VÁRIOS dias específicos da semana, ou em uma FAIXA de dias. Use quando o usuário listar mais de um dia ou uma faixa: "de segunda a sexta", "toda terça e quinta", "seg, qua e sex", "dias úteis", "todo fim de semana", "nos dias de semana".
   * "monthly" — repete todo mês na mesma data. Use SOMENTE quando disser: "todo mês", "mensalmente", "todo dia 10", "todo primeiro do mês".
   * "day_of_month" — repete todo mês em um dia específico do mês. Use SOMENTE quando especificar dia do mês com repetição mensal.
@@ -85,11 +85,13 @@ REGRA CRÍTICA SOBRE RECORRÊNCIA:
 - Se a mensagem contém uma data/hora específica SEM palavras de repetição → recorrencia = "once"
 - Palavras que NUNCA indicam recorrência: "daqui", "em X minutos", "em X horas", "hoje", "amanhã", "semana que vem", "mês que vem", "no dia X"
 - Palavras que SÓ indicam recorrência: "todo", "toda", "todos", "todas", "cada", "diariamente", "semanalmente", "mensalmente"
+- DIA DA SEMANA SOZINHO, sem "toda/todas/cada" ("na segunda", "segunda", "sábado", "sexta que vem", "essa quinta") → recorrencia = "once" (a PRÓXIMA ocorrência desse dia). É um ERRO COMUM marcar como "weekly"; só vire "weekly" se houver "toda/todas/semanalmente" junto.
 - Faixas/listas de dias ("de segunda a sexta", "terça e quinta", "dias úteis", "fim de semana") → SEMPRE recorrencia = "weekly_days" com days_of_week preenchido. NUNCA use "weekly" para mais de um dia.
 
 REGRA CRÍTICA SOBRE HORÁRIO FUTURO:
 - A data_hora deve ser SEMPRE no futuro. Se mencionarem só um horário (sem dia) e ele já passou hoje, use o PRÓXIMO dia (amanhã) nesse horário.
 - Para "weekly_days", a data_hora deve ser o PRÓXIMO dia válido do conjunto (hoje, se a hora ainda não passou), no horário pedido.
+- Para um DIA DA SEMANA único (once, ex: "na segunda", "sábado"), a data_hora deve ser a PRÓXIMA ocorrência desse dia (esta semana se ainda não passou; senão a da semana que vem), no horário pedido.
 
 Para DELETAR_LEMBRETE, extraia:
 - titulo_busca: texto para buscar o lembrete a deletar
@@ -110,6 +112,15 @@ Mensagem: "me lembra de tomar remédio todo dia às 8h"
 
 Mensagem: "me lembra de ligar pra mãe toda quinta"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Ligar pra mãe", "data_hora": "2026-04-30T09:00:00-03:00", "recorrencia": "weekly", "interval_seconds": null, "data_fim": null}}}}
+
+Mensagem: "tirar fotos no brechó sábado às 16h30"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Tirar fotos no brechó", "data_hora": "2026-04-25T16:30:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
+
+Mensagem: "fazer garimpos recentes 15h na segunda"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Fazer garimpos recentes", "data_hora": "2026-04-27T15:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
+
+Mensagem: "reunião quinta que vem às 14h"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Reunião", "data_hora": "2026-04-30T14:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
 
 Mensagem: "me lembra de bater ponto de segunda a sexta às 9h"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Bater ponto", "data_hora": "2026-04-27T09:00:00-03:00", "recorrencia": "weekly_days", "interval_seconds": null, "days_of_week": [0, 1, 2, 3, 4], "data_fim": null}}}}
