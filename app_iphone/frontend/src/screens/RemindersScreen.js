@@ -163,13 +163,13 @@ const RECURRENCE_TYPES = [
 // Tipos que precisam de uma data de referência (calendário).
 const TYPES_WITH_DATE = new Set(['once', 'weekly', 'monthly']);
 
-// Tons levemente distintos do laranja de marca (#FF8234) por grupo de
+// Tons levemente distintos do azul de marca (#0A84FF) por grupo de
 // controles — cada setor do form ganha identidade em vez de tudo chapado na
 // mesma cor. Convenção: animação + variação de tom dão acabamento.
 const SECTOR_TINTS = {
-  type: '#FF8234',   // tipo de recorrência — laranja principal
-  preset: '#F4663A', // presets (dias úteis/fim de semana) — laranja mais quente
-  day: '#F59E3C',    // dias individuais — laranja mais dourado
+  type: '#0A84FF',   // tipo de recorrência — azul principal
+  preset: '#3D6FF5', // presets (dias úteis/fim de semana) — azul mais índigo
+  day: '#2AA9E0',    // dias individuais — azul mais ciano
 };
 
 function sameDays(a, b) {

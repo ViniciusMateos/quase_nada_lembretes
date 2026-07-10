@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Image, Animated, Easing } from 'react-native';
 
-export default function LoadingDog({ size = 56, color = '#FF8234' }) {
+export default function LoadingDog({ size = 56, color = '#0A84FF' }) {
   const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {

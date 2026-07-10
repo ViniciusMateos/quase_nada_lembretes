@@ -26,7 +26,7 @@ import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
 
-const DEFAULT_AVATAR_COLOR = '#FF8234';
+const DEFAULT_AVATAR_COLOR = '#0A84FF';
 
 const removeEmoji = str =>
   str.replace(
