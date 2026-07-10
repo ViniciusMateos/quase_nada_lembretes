@@ -8,6 +8,8 @@ export default {
     orientation: 'portrait',
     icon: IS_DEV ? './assets/icon-dev.png' : './assets/icon-prod.png',
     userInterfaceStyle: 'dark',
+    // SDK 54: New Architecture (exigida pelo react-native-mmkv v3).
+    newArchEnabled: true,
     ios: {
       bundleIdentifier: IS_DEV
         ? 'com.quasenada.lembretes.dev'
@@ -39,6 +41,8 @@ export default {
       // Empacota o som de lembrete no bundle nativo (iOS e Android res/raw),
       // para o Notifee tocar o som próprio em vez do padrão do sistema.
       ['expo-notifications', { sounds: ['./assets/sound-reminder.wav'] }],
+      // SDK 54 pediu o plugin explícito do datetimepicker.
+      '@react-native-community/datetimepicker',
     ],
     extra: {
       eas: {

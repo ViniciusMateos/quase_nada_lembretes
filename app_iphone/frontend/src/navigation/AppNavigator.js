@@ -57,7 +57,7 @@ function AppTabs() {
         headerShown: false,
         lazy: false,
         freezeOnBlur: false,
-        sceneContainerStyle: { backgroundColor: theme.background },
+        sceneStyle: { backgroundColor: theme.background },
       }}
     >
       <Tab.Screen
@@ -127,7 +127,7 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: '#FF8234',
+    backgroundColor: '#0A84FF',
     alignItems: 'center',
     justifyContent: 'center',
   },

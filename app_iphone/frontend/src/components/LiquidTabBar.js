@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useTheme } from '../context/ThemeContext';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
 
@@ -10,6 +11,10 @@ const BAR_H = 60;
 
 let BlurView = null;
 try { BlurView = require('expo-blur').BlurView; } catch (e) { BlurView = null; }
+
+// Liquid glass nativo do iOS 26. Quando disponível, o material vira o glass real
+// do sistema; fora dele (iOS mais antigo / Android) cai no BlurView simulado.
+const HAS_GLASS = isLiquidGlassAvailable();
 
 // Ripple radial aproximado por anéis concêntricos (sem lib).
 const RIPPLE_RINGS = [
@@ -27,7 +32,7 @@ export function useTabBarClearance() {
 export default function LiquidTabBar({ state, descriptors, navigation }) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => makeStyles(theme, !!BlurView), [theme]);
+  const styles = useMemo(() => makeStyles(theme, !!BlurView, HAS_GLASS), [theme]);
   const [bar, setBar] = useState({ w: 0, h: 0 });
 
   const count = state.routes.length;
@@ -138,15 +143,37 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
         onLayout={e => setBar({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
         {...pan.panHandlers}
       >
-        {BlurView && <BlurView intensity={40} tint={barTint} style={StyleSheet.absoluteFill} />}
+        {HAS_GLASS ? (
+          <GlassView
+            glassEffectStyle="regular"
+            colorScheme={theme.isDark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : BlurView ? (
+          <BlurView intensity={40} tint={barTint} style={StyleSheet.absoluteFill} />
+        ) : null}
 
         {bar.w > 0 && (
           <Animated.View
             pointerEvents="none"
             style={[styles.pill, { width: cellWidth - GAP * 2, left: H_PAD + GAP, transform: [{ translateX }, { scale: pillScale }] }]}
           >
-            {BlurView && <BlurView intensity={14} tint="light" style={StyleSheet.absoluteFill} />}
-            <View style={styles.pillTint} />
+            {HAS_GLASS ? (
+              // Pílula em glass "clear" (mais translúcido) com tint da marca e
+              // isInteractive pro efeito líquido de morphing ao mover.
+              <GlassView
+                glassEffectStyle="clear"
+                isInteractive
+                tintColor={theme.primary}
+                colorScheme={theme.isDark ? 'dark' : 'light'}
+                style={StyleSheet.absoluteFill}
+              />
+            ) : (
+              <>
+                {BlurView && <BlurView intensity={14} tint="light" style={StyleSheet.absoluteFill} />}
+                <View style={styles.pillTint} />
+              </>
+            )}
           </Animated.View>
         )}
 
@@ -210,13 +237,17 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
   );
 }
 
-function makeStyles(theme, hasBlur) {
-  // Chapado + desfocado: barra escura translúcida sobre o blur (sem material
-  // chamativo nem sheen).
-  const glassBar = hasBlur
-    ? (theme.isDark ? 'rgba(24,22,28,0.55)' : 'rgba(248,248,250,0.7)')
-    : (theme.isDark ? 'rgba(26,24,30,0.92)' : 'rgba(255,255,255,0.95)');
-  const glassBorder = theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
+function makeStyles(theme, hasBlur, hasGlass) {
+  // Com liquid glass nativo a barra fica transparente pra o material do sistema
+  // aparecer. Sem ele: chapado + desfocado sobre o blur (ou opaco no fallback).
+  const glassBar = hasGlass
+    ? 'transparent'
+    : hasBlur
+      ? (theme.isDark ? 'rgba(24,22,28,0.55)' : 'rgba(248,248,250,0.7)')
+      : (theme.isDark ? 'rgba(26,24,30,0.92)' : 'rgba(255,255,255,0.95)');
+  const glassBorder = hasGlass
+    ? (theme.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.35)')
+    : (theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)');
   return StyleSheet.create({
     wrap: {
       position: 'absolute',
@@ -250,11 +281,11 @@ function makeStyles(theme, hasBlur) {
       borderRadius: 22,
       overflow: 'hidden',
       borderWidth: 1,
-      borderColor: 'rgba(255,190,140,0.55)',
+      borderColor: hasGlass ? 'rgba(255,255,255,0.22)' : 'rgba(90,176,255,0.55)',
       backgroundColor: 'transparent',
     },
-    // laranja translúcido chapado por cima do blur (desfocadinho)
-    pillTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,132,52,0.72)' },
+    // azul da marca translúcido por cima do blur (fallback sem glass nativo)
+    pillTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,132,255,0.72)' },
     tab: {
       flex: 1,
       alignItems: 'center',
