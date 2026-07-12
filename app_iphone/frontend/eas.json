@@ -7,30 +7,36 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "ios": {
         "resourceClass": "m-medium",
         "image": "latest"
       },
       "env": {
         "API_BASE_URL": "http://147.15.7.119:8000",
-        "APP_VARIANT": "development"
+        "APP_VARIANT": "development",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "ios": {
         "resourceClass": "m-medium"
       },
       "env": {
-        "API_BASE_URL": "http://147.15.7.119:8000"
+        "API_BASE_URL": "http://147.15.7.119:8000",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     },
     "production": {
+      "channel": "production",
       "ios": {
         "distribution": "store"
       },
       "env": {
-        "API_BASE_URL": "http://147.15.7.119:8000"
+        "API_BASE_URL": "http://147.15.7.119:8000",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     }
   }
