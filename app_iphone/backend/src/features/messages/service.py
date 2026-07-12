@@ -31,6 +31,7 @@ async def _save_history(
     content: str,
     intent: str | None = None,
     model_used: str | None = None,
+    session_id: str | None = None,
 ) -> None:
     entry = ChatHistory(
         id=str(uuid.uuid4()),
@@ -39,21 +40,26 @@ async def _save_history(
         content=content,
         intent=intent,
         model_used=model_used,
+        session_id=session_id,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     db.add(entry)
     await db.flush()
 
 
-async def _get_recent_history(db: AsyncSession, user_id: str) -> list[dict[str, str]]:
+async def _get_recent_history(
+    db: AsyncSession,
+    user_id: str,
+    session_id: str | None = None,
+) -> list[dict[str, str]]:
     from sqlalchemy import select
     from src.models.models import ChatHistory as CH
-    result = await db.execute(
-        select(CH)
-        .where(CH.user_id == user_id)
-        .order_by(CH.created_at.desc())
-        .limit(10)
-    )
+    stmt = select(CH).where(CH.user_id == user_id)
+    # Contexto por sessão: cada abertura do app é uma sessão nova. Sem session_id
+    # (cliente antigo) cai no comportamento anterior (janela global do usuário).
+    if session_id:
+        stmt = stmt.where(CH.session_id == session_id)
+    result = await db.execute(stmt.order_by(CH.created_at.desc()).limit(10))
     rows = list(result.scalars().all())
     rows.reverse()
     return [{"role": r.role, "content": r.content} for r in rows]
@@ -67,9 +73,9 @@ async def process_message(
     message_id = str(uuid.uuid4())
 
     # Buscar histórico ANTES de salvar a mensagem atual para não duplicar
-    history = await _get_recent_history(db, user.id)
+    history = await _get_recent_history(db, user.id, payload.session_id)
 
-    await _save_history(db, user.id, "user", payload.content)
+    await _save_history(db, user.id, "user", payload.content, session_id=payload.session_id)
     chat_task: asyncio.Task | None = asyncio.create_task(
         chat_general(payload.content, history)
     )
@@ -79,6 +85,7 @@ async def process_message(
             user_message=payload.content,
             current_datetime=payload.client_timestamp,
             hour_format=payload.hour_format,
+            history=history,
         )
     except Exception as e:
         if chat_task and not chat_task.done():
@@ -112,6 +119,18 @@ async def process_message(
             ],
         }
         response_text = f"Esse horário ({hora_label}) é de manhã ou à noite?"
+
+    # ── CRIAR_LEMBRETE sem horário → pede o horário (em vez de chutar +1h) ──
+    elif intent == "CRIAR_LEMBRETE" and not (dados.get("data_hora") or "").strip():
+        titulo = (dados.get("titulo") or "").strip()
+        action = {
+            "type": "needs_time_clarification",
+            "reason": "no_time",
+            "titulo": titulo,
+            "options": [],
+        }
+        alvo = f"'{titulo}'" if titulo else "esse lembrete"
+        response_text = f"Pra quando é {alvo}? Me diz o horário (ex: hoje às 18h30)."
 
     # ── CRIAR_LEMBRETE ──
     elif intent == "CRIAR_LEMBRETE":
@@ -241,7 +260,7 @@ async def process_message(
             ) from e
         action = None
 
-    await _save_history(db, user.id, "assistant", response_text, intent=intent, model_used=model_used)
+    await _save_history(db, user.id, "assistant", response_text, intent=intent, model_used=model_used, session_id=payload.session_id)
 
     # Commit explícito antes de retornar: garante que o reminder já está no banco
     # quando o app chamar /sync imediatamente após receber a resposta.

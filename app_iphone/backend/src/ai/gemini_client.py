@@ -53,11 +53,11 @@ _INTENT_PROMPT_PREFIX = """Você é um sistema de extração de dados. Responda 
 Classifique a mensagem do usuário e extraia os dados relevantes.
 
 A "intencao" deve ser uma das seguintes:
-- "CRIAR_LEMBRETE": usuário quer criar/adicionar/agendar um lembrete
-- "EDITAR_LEMBRETE": usuário quer alterar/mudar/editar/atualizar um lembrete existente (data, horário ou título)
-- "DELETAR_LEMBRETE": usuário quer remover/apagar/cancelar um lembrete
+- "CRIAR_LEMBRETE": usuário quer criar/adicionar/agendar um lembrete. IMPORTANTE: uma DESCRIÇÃO solta + (opcional) horário, SEM verbo de alteração, é SEMPRE criar (ex.: "lançar réguas 16h40", "reunião amanhã 9h", "comprar pão"). É o caso mais comum.
+- "EDITAR_LEMBRETE": usuário quer alterar um lembrete que JÁ EXISTE, com verbo EXPLÍCITO de mudança referindo algo anterior: "muda", "altera", "edita", "troca o horário de", "adianta", "atrasa", "renomeia". SEM esse verbo explícito, NÃO é edição — é CRIAR. Na dúvida entre criar e editar, é CRIAR.
+- "DELETAR_LEMBRETE": usuário quer remover/apagar/cancelar um lembrete (verbo explícito: "apaga", "deleta", "cancela", "remove")
 - "LISTAR_LEMBRETES": usuário quer ver/listar/consultar seus lembretes
-- "CHAT_GERAL": qualquer outra mensagem (saudação, dúvida, conversa)
+- "CHAT_GERAL": saudação, dúvida ou conversa que NÃO é um pedido de criar/editar/deletar/listar. Nunca use CHAT_GERAL pra um pedido de lembrete.
 
 Para EDITAR_LEMBRETE, extraia:
 - titulo_busca: texto para localizar o lembrete a editar (obrigatório)
@@ -80,6 +80,7 @@ Para CRIAR_LEMBRETE, extraia:
 - precisa_ampm: true SOMENTE se o "Formato de hora do usuário" for "12h" E o horário mencionado tiver hora de 1 a 12 SEM indicação de manhã/tarde/noite/AM/PM (ex: "às 9h", "às 7", "8 e meia"). Se o usuário disser "9 da manhã", "9 da noite", "21h", "meio-dia", "meia-noite", ou o formato for "24h" → precisa_ampm = false. Quando true, ainda preencha data_hora com seu melhor palpite (manhã).
 - hora_ambigua: quando precisa_ampm=true, a hora no formato "H:MM" (ex: "9:00"). Senão null.
 - data_fim: data de término ISO 8601 com offset (se mencionado, senão null)
+- pre_lembretes: lista de inteiros de SEGUNDOS antes do disparo, quando o usuário pedir avisos ANTECIPADOS ("me lembra X antes", "me avisa X antes"). Ex.: "me lembra 30 minutos antes" = [1800]; "uma semana antes e 1 hora antes" = [604800, 3600]; "meia hora e 10 min antes" = [1800, 600]. Pode ter VÁRIOS. Se não pedir aviso antecipado, use [] ou null. (offsets comuns: 30min=1800, 1h=3600, 1 dia=86400, 1 semana=604800.)
 
 REGRA CRÍTICA SOBRE RECORRÊNCIA:
 - Se a mensagem contém uma data/hora específica SEM palavras de repetição → recorrencia = "once"
@@ -103,6 +104,15 @@ Para CHAT_GERAL: sem dados extras.
 
 Mensagem: "me lembra de comer daqui 5 minutos"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Comer", "data_hora": "2026-04-24T12:05:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
+
+Mensagem: "lançar réguas 16h40"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Lançar réguas", "data_hora": "2026-04-24T16:40:00-03:00", "recorrencia": "once", "interval_seconds": null, "days_of_week": null, "pre_lembretes": null, "data_fim": null}}}}
+
+Mensagem: "trombar a byby 18h30 e me lembra 30 minutos antes"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Trombar a byby", "data_hora": "2026-04-24T18:30:00-03:00", "recorrencia": "once", "interval_seconds": null, "days_of_week": null, "pre_lembretes": [1800], "data_fim": null}}}}
+
+Mensagem: "reunião quarta 9h, me avisa uma semana antes e 1 hora antes"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Reunião", "data_hora": "2026-04-29T09:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "days_of_week": null, "pre_lembretes": [604800, 3600], "data_fim": null}}}}
 
 Mensagem: "me lembra de ligar pro médico amanhã às 10h"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Ligar pro médico", "data_hora": "2026-04-25T10:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
@@ -174,21 +184,52 @@ Mensagem: "altera o lembrete de academia para às 19h"
 # Sufixo dinâmico — apenas as variáveis que mudam por requisição
 _INTENT_PROMPT_SUFFIX = """Data/hora atual do cliente: {current_datetime}
 Formato de hora do usuário: {hour_format}
-Mensagem do usuário: {user_message}
+{conversation}Mensagem do usuário: {user_message}
 
 Responda SOMENTE com JSON válido. Nunca coloque instruções como "CALCULE:" no JSON — apenas o valor ISO 8601 calculado."""
 
-def _build_intent_prompt(user_message: str, current_datetime: str, hour_format: str) -> str:
+
+def _format_conversation(history: list[dict[str, str]] | None) -> str:
+    """Contexto da conversa da sessão pra resolver mensagens de follow-up
+    (ex.: 'às 18h' logo após 'me lembra de trombar a byby')."""
+    if not history:
+        return ""
+    linhas = []
+    for entry in history[-6:]:
+        quem = "Usuário" if entry.get("role") == "user" else "Assistente"
+        linhas.append(f"{quem}: {entry.get('content', '')}")
+    return (
+        "Conversa recente (contexto da sessão; a 'Mensagem do usuário' abaixo é a "
+        "atual — use o contexto se ela complementar um pedido anterior):\n"
+        + "\n".join(linhas)
+        + "\n\n"
+    )
+
+
+def _build_intent_prompt(
+    user_message: str,
+    current_datetime: str,
+    hour_format: str,
+    history: list[dict[str, str]] | None = None,
+) -> str:
     return _INTENT_PROMPT_PREFIX + _INTENT_PROMPT_SUFFIX.format(
         current_datetime=current_datetime,
         hour_format=hour_format,
+        conversation=_format_conversation(history),
         user_message=user_message,
     )
 
 CHAT_SYSTEM_PROMPT = """Você é o assistente de lembretes do app Quase Nada.
-Responda em português brasileiro de forma conversacional, amigável e concisa.
-Ajude o usuário com dúvidas sobre o app, lembretes e organização.
-Se não souber algo, seja honesto. Não invente informações."""
+Responda em português brasileiro, conversacional, amigável e CONCISO.
+Escreva em TEXTO PURO, SEM markdown (nada de **negrito**, #, nem listas com * ou -).
+
+REGRA ABSOLUTA: você NÃO executa ações. Você NÃO cria, edita nem deleta lembretes —
+isso é feito pelo sistema, em outro fluxo, não por você. Então NUNCA diga "Lembrete
+criado", "Lembrete editado", "Pronto, agendei", nem invente que fez ou vai fazer algo.
+Se o usuário quer criar/editar/deletar um lembrete, apenas oriente a mandar como comando
+direto e curto (ex.: 'manda assim: lançar réguas hoje 16h40'). Nunca finja que executou.
+
+Ajude com dúvidas sobre o app e organização. Se não souber algo, seja honesto."""
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -206,14 +247,17 @@ async def classify_intent(
     user_message: str,
     current_datetime: str,
     hour_format: str = "24h",
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """
     Classify the intent of a user message and extract relevant data.
     Returns dict with 'intencao' and 'dados' keys.
+    `history` (opcional) traz as mensagens recentes da sessão pra resolver
+    follow-ups (ex.: informar só o horário depois de já ter dito o lembrete).
     Falls back through MODELOS_PREFERIDOS on 429/404 errors; quota-exceeded
     models are skipped for 1 hour before being retried.
     """
-    prompt = _build_intent_prompt(user_message, current_datetime, hour_format)
+    prompt = _build_intent_prompt(user_message, current_datetime, hour_format, history)
 
     last_error: Exception | None = None
 

@@ -6,6 +6,11 @@
 import apiClient from './client';
 import { detectIs12h } from '../utils/timeFormat';
 
+// ID de sessão do chat — gerado UMA vez por abertura do app (enquanto este módulo
+// vive na memória). Mantém o contexto da IA por sessão e zera só quando o app é
+// fechado de vez (background/resume preserva).
+const SESSION_ID = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
 /**
  * Envia mensagem para a IA e recebe resposta com intenção detectada.
  * @param {{ content: string, client_timestamp: string }} data — timestamp em ISO8601
@@ -22,6 +27,7 @@ export async function sendMessage({ content, client_timestamp }) {
     content,
     client_timestamp,
     hour_format: detectIs12h() ? '12h' : '24h',
+    session_id: SESSION_ID,
   }, { timeout: 90000 });
   return response.data;
 }
