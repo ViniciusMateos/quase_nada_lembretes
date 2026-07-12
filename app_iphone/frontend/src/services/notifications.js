@@ -17,6 +17,47 @@ const ANDROID_SOUND = 'sound_reminder';
 const SNOOZE_PREFIX = 'snooze_';
 const SNOOZE_HINT = '\nsegure para adiar';
 
+// Notificações-resumo: diária às 12h do dia anterior ("você tem X pra amanhã")
+// e semanal na segunda de manhã. Ids com prefixo summary_ — como não começam
+// com snooze_, o cancelSyncedNotifications já as recria a cada sync.
+const SUMMARY_PREFIX = 'summary_';
+const DAILY_SUMMARY_HOUR = 12; // 12h (BRT) do dia anterior
+const WEEKLY_SUMMARY_HOUR = 8; // segunda 8h (BRT)
+const BRT_OFFSET_MS = 3 * 60 * 60 * 1000; // Brasília fixo UTC-3
+
+// Chave de dia (YYYY-MM-DD) em BRT a partir de um epoch.
+function brtDayKey(ts) {
+  const d = new Date(ts - BRT_OFFSET_MS);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Epoch de um horário de parede BRT num dia (YYYY-MM-DD). BRT->UTC = +3h.
+function brtTimestamp(dayKey, hour) {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  return Date.UTC(y, m - 1, d, hour + 3, 0, 0);
+}
+
+function dayKeyFromParts(base) {
+  const dt = new Date(base);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+function prevDayKey(dayKey) {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  return dayKeyFromParts(Date.UTC(y, m - 1, d) - 86400000);
+}
+
+// Segunda-feira da semana de um dayKey (Seg como início).
+function mondayOfWeekKey(dayKey) {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  const base = Date.UTC(y, m - 1, d);
+  const backToMon = (new Date(base).getUTCDay() + 6) % 7; // Dom=0 -> 6, Seg=1 -> 0
+  return dayKeyFromParts(base - backToMon * 86400000);
+}
+
 // Som do app SEMPRE — nunca o som padrão do sistema (decisão de produto:
 // o lembrete sempre toca a voz/efeito do Quase Nada, sem opção de desligar).
 function iosSound() {
@@ -169,8 +210,85 @@ export async function scheduleFromSync(syncData) {
         });
       }
     }
+
+    await scheduleSummaryNotifications(syncData);
   } catch (error) {
     console.warn('[Notifications] Erro ao sincronizar notificações:', error);
+  }
+}
+
+// Agenda as notificações-resumo a partir das mesmas execuções do /sync:
+// - DIÁRIA: às 12h do dia anterior, uma notificação unificada por dia
+//   ("você tem N lembretes para amanhã: ...").
+// - SEMANAL: toda segunda 8h, o total da semana.
+// Recriadas a cada sync (ids determinísticos), então não duplicam.
+async function scheduleSummaryNotifications(syncData) {
+  const now = Date.now();
+  // TESTE: dispara os resumos em segundos em vez dos horários reais (12h dia
+  // anterior / segunda 8h). TROCAR PRA false depois de testar.
+  const SUMMARY_TEST = false;
+  const byDay = {}; // dayKey(BRT) -> [titles]
+
+  for (const reminder of syncData.reminders) {
+    if (!reminder.is_active) continue;
+    for (const executionISO of reminder.scheduled_executions || []) {
+      const ts = new Date(executionISO).getTime();
+      if (ts <= now) continue;
+      const key = brtDayKey(ts);
+      (byDay[key] = byDay[key] || []).push({ title: reminder.title, ts });
+    }
+  }
+
+  const dayKeys = Object.keys(byDay).sort();
+
+  const emit = async (id, title, body, data, timestamp) => {
+    const notif = buildNotification(id, title, body);
+    delete notif.android.actions; // resumo não tem "adiar"
+    // Categoria própria do resumo — casa com a Notification Content Extension
+    // (targets/resumo-notif) quando ela for buildada; sem ela, mostra o padrão.
+    notif.ios.categoryId = 'resumo';
+    notif.data = data;
+    await notifee.createTriggerNotification(notif, { type: TriggerType.TIMESTAMP, timestamp });
+  };
+
+  // Corpo listando cada lembrete (nome + horário) — cada um numa linha, pra
+  // aparecer todos ao expandir/segurar a notificação. `comDia` inclui o dia.
+  const SP = 'America/Sao_Paulo';
+  const hm = ts =>
+    new Intl.DateTimeFormat('pt-BR', { timeZone: SP, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ts));
+  const diaHm = ts =>
+    new Intl.DateTimeFormat('pt-BR', { timeZone: SP, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+      .format(new Date(ts))
+      .replace('.', '');
+  const listar = (items, comDia) => {
+    const linhas = items.slice(0, 10).map(it => `• ${it.title} — ${comDia ? diaHm(it.ts) : hm(it.ts)}`);
+    if (items.length > 10) linhas.push(`…e mais ${items.length - 10}`);
+    return linhas.join('\n');
+  };
+
+  // Diária — 12h do dia anterior a cada dia com lembretes.
+  for (const dayKey of dayKeys) {
+    const fireTs = SUMMARY_TEST ? now + 12000 : brtTimestamp(prevDayKey(dayKey), DAILY_SUMMARY_HOUR);
+    if (!SUMMARY_TEST && fireTs <= now) continue; // aviso das 12h de ontem já passou
+    const items = byDay[dayKey].slice().sort((a, b) => a.ts - b.ts);
+    const n = items.length;
+    const body = `Você tem ${n} ${n === 1 ? 'lembrete' : 'lembretes'} para amanhã:\n${listar(items, false)}`;
+    await emit(`${SUMMARY_PREFIX}daily_${dayKey}`, 'Lembretes de amanhã', body, { type: 'summary_daily', dayKey }, fireTs);
+  }
+
+  // Semanal — segunda 8h, todos os lembretes da semana (seg..dom).
+  const byWeek = {}; // mondayKey -> [{title, ts}]
+  for (const dayKey of dayKeys) {
+    const mk = mondayOfWeekKey(dayKey);
+    (byWeek[mk] = byWeek[mk] || []).push(...byDay[dayKey]);
+  }
+  for (const mondayKey of Object.keys(byWeek).sort()) {
+    const fireTs = SUMMARY_TEST ? now + 30000 : brtTimestamp(mondayKey, WEEKLY_SUMMARY_HOUR);
+    if (!SUMMARY_TEST && fireTs <= now) continue;
+    const items = byWeek[mondayKey].slice().sort((a, b) => a.ts - b.ts);
+    const n = items.length;
+    const body = `Você tem ${n} ${n === 1 ? 'lembrete' : 'lembretes'} essa semana:\n${listar(items, true)}`;
+    await emit(`${SUMMARY_PREFIX}weekly_${mondayKey}`, 'Lembretes da semana', body, { type: 'summary_weekly', mondayKey }, fireTs);
   }
 }
 
@@ -180,11 +298,14 @@ export async function scheduleSnoozeNotification({ reminderId, title, minutes })
   try {
     await ensureChannel();
     const timestamp = Date.now() + minutes * 60 * 1000;
+    const cleanTitle = (title || 'Lembrete').split('\n')[0];
     const notif = buildNotification(
       `${SNOOZE_PREFIX}${reminderId || 'x'}_${Date.now()}`,
       'Quase Nada Lembretes',
-      (title || 'Lembrete') + SNOOZE_HINT,
+      cleanTitle + SNOOZE_HINT,
     );
+    // Guarda o título LIMPO no data pra o próximo adiar não reanexar o hint.
+    notif.data = { reminderId: reminderId || '', title: cleanTitle, isRecurring: '1' };
     await notifee.createTriggerNotification(notif, {
       type: TriggerType.TIMESTAMP,
       timestamp,
@@ -219,7 +340,7 @@ export async function handleNotificationEvent({ type, detail }) {
     const minutes = actionId === ACTION_SNOOZE_5 ? 5 : 10;
     const data = detail?.notification?.data || {};
     const reminderId = data.reminderId;
-    const title = data.title || detail?.notification?.body || 'Lembrete';
+    const title = (data.title || detail?.notification?.body || 'Lembrete').split('\n')[0];
     const isRecurring = data.isRecurring === '1';
 
     if (isRecurring) {
@@ -253,11 +374,11 @@ export async function displayLocalNotification(title, body, { silent = false } =
     await ensureChannel();
     const notif = buildNotification(`local_${Date.now()}`, title, body);
     // remove ações de adiar nesse aviso informativo
-    notif.android.actions = undefined;
-    notif.ios.categoryId = undefined;
+    delete notif.android.actions;
+    delete notif.ios.categoryId;
     if (silent) {
-      notif.android.sound = undefined;
-      notif.ios.sound = undefined;
+      delete notif.android.sound;
+      delete notif.ios.sound;
       notif.ios.foregroundPresentationOptions.sound = false;
     }
     await notifee.displayNotification(notif);
