@@ -9,11 +9,13 @@ import apiClient from './client';
  * Lista todos os lembretes do usuário.
  * @returns {Promise<{ reminders: Array<object>, total: number }>}
  */
-export async function listReminders() {
+export async function listReminders({ activeOnly = true } = {}) {
   // limit alto p/ trazer TODOS os lembretes ativos — mantém a aba consistente
   // com o /sync (que agenda todos), evitando "dispara mas não aparece na lista".
+  // activeOnly=false inclui inativos (ex.: um 'once' que já disparou, pra editar
+  // a partir do toque na notificação).
   const response = await apiClient.get('/api/v1/reminders', {
-    params: { active_only: true, limit: 500, offset: 0 },
+    params: { active_only: activeOnly, limit: 500, offset: 0 },
   });
   return response.data;
 }
