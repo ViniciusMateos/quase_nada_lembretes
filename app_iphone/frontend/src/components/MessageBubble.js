@@ -212,9 +212,9 @@ function makeStyles(theme) {
       borderBottomLeftRadius: 4,
       paddingHorizontal: 14,
       paddingVertical: 12,
-      backgroundColor: theme.isDark ? 'rgba(255, 130, 52, 0.12)' : '#FFF3EA',
+      backgroundColor: theme.isDark ? 'rgba(10, 132, 255, 0.12)' : '#EAF2FF',
       borderWidth: 1,
-      borderColor: theme.isDark ? 'rgba(255, 130, 52, 0.35)' : '#FFD4B8',
+      borderColor: theme.isDark ? 'rgba(10, 132, 255, 0.35)' : '#B8D4FF',
     },
     content: {
       fontSize: 15,

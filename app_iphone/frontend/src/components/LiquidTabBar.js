@@ -164,9 +164,9 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
               <GlassView
                 glassEffectStyle="clear"
                 isInteractive
-                tintColor={theme.primary}
+                tintColor="rgba(10,132,255,0.4)"
                 colorScheme={theme.isDark ? 'dark' : 'light'}
-                style={StyleSheet.absoluteFill}
+                style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
               />
             ) : (
               <>
@@ -278,7 +278,7 @@ function makeStyles(theme, hasBlur, hasGlass) {
       position: 'absolute',
       top: 7,
       bottom: 7,
-      borderRadius: 22,
+      borderRadius: 24,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: hasGlass ? 'rgba(255,255,255,0.22)' : 'rgba(90,176,255,0.55)',
