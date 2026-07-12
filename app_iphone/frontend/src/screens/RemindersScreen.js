@@ -26,6 +26,8 @@ import TimePickerNative from '../components/TimePickerNative';
 import { detectIs12h } from '../utils/timeFormat';
 import { formatTodayLabel, getWeekKey } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
+import { onEditReminder } from '../utils/editReminderIntent';
+import PreReminderPicker from '../components/PreReminderPicker';
 import { useTabBarClearance } from '../components/LiquidTabBar';
 import { useFocusEffect } from '@react-navigation/native';
 import useFocusEntrance from '../hooks/useFocusEntrance';
@@ -142,6 +144,81 @@ function groupReminders(reminders) {
   return { upcoming, recurring };
 }
 
+const SP_TZ = 'America/Sao_Paulo';
+
+// Chave de dia (YYYY-MM-DD) no fuso de Brasília, pra agrupar por dia.
+function spDateKey(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SP_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const get = t => parts.find(p => p.type === t)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+// Diferença em dias entre duas chaves YYYY-MM-DD.
+function daysBetweenKeys(aKey, bKey) {
+  const [ay, am, ad] = aKey.split('-').map(Number);
+  const [by, bm, bd] = bKey.split('-').map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+}
+
+// Dia da semana (Seg=0..Dom=6) de uma chave YYYY-MM-DD.
+function weekdayIdx(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+
+function cap(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// Bucket a partir do next_execution — MESMO fluxo pra pontuais e recorrentes.
+// Perto: dia exato (Hoje / Amanhã / dia da semana desta semana).
+// Longe: faixas (Semana que vem, Daqui N semanas, Mês que vem, mês por nome).
+function bucketFor(date) {
+  const dk = spDateKey(date);
+  const nk = spDateKey(new Date());
+  const diff = daysBetweenKeys(nk, dk);
+  if (diff <= 0) return { key: 'b-hoje', order: 0, label: 'Hoje' };
+  if (diff === 1) return { key: 'b-amanha', order: 1, label: 'Amanhã' };
+
+  const daysLeftThisWeek = 6 - weekdayIdx(nk); // até domingo desta semana
+  if (diff <= daysLeftThisWeek) {
+    const wd = new Intl.DateTimeFormat('pt-BR', { timeZone: SP_TZ, weekday: 'long' }).format(date);
+    return { key: `d-${dk}`, order: 10 + diff, label: cap(wd) };
+  }
+
+  const weeksAhead = Math.ceil((diff - daysLeftThisWeek) / 7);
+  if (weeksAhead === 1) return { key: 'w1', order: 100, label: 'Semana que vem' };
+  if (weeksAhead === 2) return { key: 'w2', order: 101, label: 'Daqui 2 semanas' };
+  if (weeksAhead === 3) return { key: 'w3', order: 102, label: 'Daqui 3 semanas' };
+
+  const [ny, nm] = nk.split('-').map(Number);
+  const [dy, dmo] = dk.split('-').map(Number);
+  const monthsAhead = (dy - ny) * 12 + (dmo - nm);
+  if (monthsAhead <= 1) return { key: 'm1', order: 200, label: 'Mês que vem' };
+  const mn = new Intl.DateTimeFormat('pt-BR', { timeZone: SP_TZ, month: 'long' }).format(date);
+  return { key: `mo-${dy}-${dmo}`, order: 200 + monthsAhead, label: cap(mn) };
+}
+
+// Agrupa TODOS os lembretes (pontuais E recorrentes) pelos buckets acima,
+// ordenados; dentro do bucket, por horário. Sem data vai pro fim.
+function groupRemindersByBucket(reminders) {
+  const withDate = reminders
+    .filter(r => r.next_execution)
+    .slice()
+    .sort((a, b) => new Date(a.next_execution) - new Date(b.next_execution));
+  const noDate = reminders.filter(r => !r.next_execution);
+  const map = {};
+  for (const r of withDate) {
+    const b = bucketFor(new Date(r.next_execution));
+    if (!map[b.key]) map[b.key] = { key: b.key, label: b.label, order: b.order, items: [] };
+    map[b.key].items.push(r);
+  }
+  const groups = Object.values(map).sort((a, b) => a.order - b.order);
+  return { groups, noDate };
+}
+
 // Convenção weekday(): Seg=0 .. Dom=6
 const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const DAY_PRESETS = [
@@ -194,6 +271,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
   const [intervalValue, setIntervalValue] = useState('1');
   const [intervalUnit, setIntervalUnit] = useState('days');
+  const [preReminders, setPreReminders] = useState([]);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -239,6 +317,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
       const iv = intervalFromSeconds(reminder.interval_seconds);
       setIntervalValue(iv.value);
       setIntervalUnit(iv.unit);
+      setPreReminders(Array.isArray(reminder.pre_reminders) ? reminder.pre_reminders : []);
       setErrors({});
       setCalendarVisible(false);
       setTimePickerVisible(false);
@@ -331,6 +410,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
       if (recurrence === 'interval_seconds') {
         payload.interval_seconds = intervalSeconds;
       }
+      payload.pre_reminders = preReminders;
       await onSave(reminder.id, payload);
     } finally {
       setIsSaving(false);
@@ -524,6 +604,9 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             </AnimatedExpand>
             {errors.datetime ? <Text style={styles.fieldError}>{errors.datetime}</Text> : null}
 
+            <Text style={[styles.label, { marginTop: 14 }]}>Me avise antes (opcional)</Text>
+            <PreReminderPicker value={preReminders} onChange={setPreReminders} theme={theme} />
+
             <View style={styles.buttons}>
               <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
                 <Text style={[styles.btnText, styles.btnCancelText]}>Cancelar</Text>
@@ -620,6 +703,7 @@ export default function RemindersScreen({ navigation }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [editingReminder, setEditingReminder] = useState(null);
+  const [pendingEditId, setPendingEditId] = useState(null);
   const [deletingReminder, setDeletingReminder] = useState(null);
   const [taskDraftName, setTaskDraftName] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -630,6 +714,35 @@ export default function RemindersScreen({ navigation }) {
   // página e troca de tela sem querer.
   const overlayOpenRef = useRef(false);
   const screenWidth = Dimensions.get('window').width;
+
+  // Toque na notificação do lembrete → guarda o id pra abrir a edição.
+  useEffect(() => onEditReminder(id => setPendingEditId(id)), []);
+  // Quando a lista já tem o lembrete pendente, abre o modal de edição.
+  useEffect(() => {
+    if (!pendingEditId) return;
+    const alvo = reminders.find(r => r.id === pendingEditId);
+    if (alvo) {
+      setEditingReminder(alvo);
+      setPendingEditId(null);
+      return;
+    }
+    // Não está na lista ativa (ex.: 'once' que já disparou e foi desativado) →
+    // busca incluindo inativos pra conseguir abrir a edição mesmo assim.
+    let cancelled = false;
+    listReminders({ activeOnly: false })
+      .then(data => {
+        if (cancelled) return;
+        const found = (data.reminders || []).find(r => r.id === pendingEditId);
+        if (found) setEditingReminder(found);
+        setPendingEditId(null);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingEditId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingEditId, reminders]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -649,8 +762,8 @@ export default function RemindersScreen({ navigation }) {
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            swipeTranslateX.setValue(0);
             navigation.navigate('Chat');
+            requestAnimationFrame(() => swipeTranslateX.setValue(0));
           });
           animateTabTo(1);
           return;
@@ -762,7 +875,9 @@ export default function RemindersScreen({ navigation }) {
     }
   };
 
-  const { upcoming, recurring } = groupReminders(reminders);
+  const pontuaisGrp = groupRemindersByBucket(reminders.filter(r => !r.recurrence || r.recurrence === 'once'));
+  const recorrentes = reminders.filter(r => r.recurrence && r.recurrence !== 'once');
+  const recorrentesGrp = groupRemindersByBucket(recorrentes);
 
   if (isLoading) {
     return (
@@ -787,14 +902,24 @@ export default function RemindersScreen({ navigation }) {
     );
   }
 
+  const pushBuckets = (grp, prefix) => {
+    grp.groups.forEach(g => {
+      sections.push({ type: 'header', id: `${prefix}-${g.key}`, title: g.label, count: g.items.length });
+      g.items.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
+    });
+    if (grp.noDate.length > 0) {
+      sections.push({ type: 'header', id: `${prefix}-nodate`, title: 'Sem data', count: grp.noDate.length });
+      grp.noDate.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
+    }
+  };
+
   const sections = [];
-  if (upcoming.length > 0) {
-    sections.push({ type: 'header', id: 'header-upcoming', title: 'Próximos' });
-    upcoming.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
-  }
-  if (recurring.length > 0) {
-    sections.push({ type: 'header', id: 'header-recurring', title: 'Recorrentes' });
-    recurring.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
+  // Vertente 1 — pontuais, sem cabeçalho de seção (só os buckets de dia).
+  pushBuckets(pontuaisGrp, 'p');
+  // Vertente 2 — recorrentes, com o cabeçalho "Recorrentes" e os buckets próprios.
+  if (recorrentes.length > 0) {
+    sections.push({ type: 'section', id: 'sec-recorrentes', title: 'Recorrentes', count: recorrentes.length });
+    pushBuckets(recorrentesGrp, 'r');
   }
 
   return (
@@ -831,8 +956,29 @@ export default function RemindersScreen({ navigation }) {
             data={sections}
             keyExtractor={item => item.id}
             renderItem={({ item }) => {
+              if (item.type === 'section') {
+                return (
+                  <View style={styles.sectionDividerRow}>
+                    <Text style={styles.sectionDividerText}>{item.title}</Text>
+                    {typeof item.count === 'number' && (
+                      <View style={[styles.sectionCountBadge, { marginTop: 0 }]}>
+                        <Text style={styles.sectionCountText}>{item.count}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              }
               if (item.type === 'header') {
-                return <Text style={styles.sectionHeader}>{item.title}</Text>;
+                return (
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionHeader}>{item.title}</Text>
+                    {typeof item.count === 'number' && (
+                      <View style={styles.sectionCountBadge}>
+                        <Text style={styles.sectionCountText}>{item.count}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
               }
               return (
                 <ReminderItem
@@ -846,15 +992,9 @@ export default function RemindersScreen({ navigation }) {
             }}
             contentContainerStyle={[sections.length === 0 ? styles.emptyContainer : styles.listContent, { paddingBottom: tabClear }]}
             showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={handleRefresh}
-                tintColor="transparent"
-                colors={['transparent']}
-                progressBackgroundColor="transparent"
-              />
-            }
+            onScrollEndDrag={e => {
+              if (e.nativeEvent.contentOffset.y < -70 && !isRefreshing) handleRefresh();
+            }}
             ListEmptyComponent={
               <View style={styles.centered}>
                 <Text style={styles.emptyText}>Nenhum lembrete criado ainda.</Text>
@@ -955,10 +1095,49 @@ function makeStyles(theme) {
       color: theme.textSecondary,
       textTransform: 'uppercase',
       letterSpacing: 0.8,
-      paddingHorizontal: 16,
+      paddingLeft: 16,
+      paddingRight: 0,
       paddingTop: 24,
       paddingBottom: 8,
       fontFamily: 'System',
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    sectionCountBadge: {
+      minWidth: 20,
+      height: 20,
+      borderRadius: 10,
+      paddingHorizontal: 6,
+      backgroundColor: theme.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 6,
+      marginTop: 16,
+    },
+    sectionCountText: {
+      color: '#FFFFFF',
+      fontSize: 11,
+      fontWeight: '700',
+      fontFamily: 'System',
+    },
+    sectionDividerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginTop: 22,
+      paddingTop: 16,
+      paddingBottom: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.border,
+    },
+    sectionDividerText: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: theme.textPrimary,
+      fontFamily: 'System',
+      marginRight: 2,
     },
     emptyText: {
       fontSize: 16,
