@@ -18,6 +18,7 @@ import {
 import CalendarPicker from './CalendarPicker';
 import TimePickerNative from './TimePickerNative';
 import LoadingDog from './LoadingDog';
+import PreReminderPicker from './PreReminderPicker';
 import PressableScale from './PressableScale';
 import { detectIs12h } from '../utils/timeFormat';
 
@@ -119,7 +120,7 @@ const RECURRENCE_TYPES = [
 
 const TYPES_WITH_DATE = new Set(['once', 'weekly', 'monthly']);
 
-const SECTOR_TINTS = { type: '#FF8234', preset: '#F4663A', day: '#F59E3C' };
+const SECTOR_TINTS = { type: '#0A84FF', preset: '#3D6FF5', day: '#2AA9E0' };
 
 function sameDays(a, b) {
   if (a.length !== b.length) return false;
@@ -148,6 +149,7 @@ export default function ReminderFormModal({ visible, reminder, onSave, onClose, 
   const [pickerTime, setPickerTime] = useState({ hours: 9, minutes: 0, period: 'AM' });
   const [intervalValue, setIntervalValue] = useState('1');
   const [intervalUnit, setIntervalUnit] = useState('days');
+  const [preReminders, setPreReminders] = useState([]);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -191,6 +193,7 @@ export default function ReminderFormModal({ visible, reminder, onSave, onClose, 
       const iv = intervalFromSeconds(reminder.interval_seconds);
       setIntervalValue(iv.value);
       setIntervalUnit(iv.unit);
+      setPreReminders(Array.isArray(reminder.pre_reminders) ? reminder.pre_reminders : []);
       setErrors({});
       setCalendarVisible(false);
       setTimePickerVisible(false);
@@ -269,6 +272,7 @@ export default function ReminderFormModal({ visible, reminder, onSave, onClose, 
       const payload = { title: title.trim(), scheduled_time: finalDate.toISOString(), recurrence };
       if (recurrence === 'weekly_days') payload.days_of_week = [...selectedDays].sort((a, b) => a - b);
       if (recurrence === 'interval_seconds') payload.interval_seconds = intervalSeconds;
+      payload.pre_reminders = preReminders;
       await onSave(payload);
     } finally {
       setIsSaving(false);
@@ -436,6 +440,9 @@ export default function ReminderFormModal({ visible, reminder, onSave, onClose, 
               <TimePickerNative value={pickerTime} onChange={setPickerTime} is12h={IS_12H} theme={theme} />
             </AnimatedExpand>
             {errors.datetime ? <Text style={styles.fieldError}>{errors.datetime}</Text> : null}
+
+            <Text style={[styles.label, { marginTop: 14 }]}>Me avise antes (opcional)</Text>
+            <PreReminderPicker value={preReminders} onChange={setPreReminders} theme={theme} />
 
             <View style={styles.buttons}>
               <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
