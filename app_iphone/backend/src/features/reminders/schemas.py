@@ -1,3 +1,5 @@
+import json
+
 from pydantic import BaseModel
 
 
@@ -12,6 +14,40 @@ def _parse_days_csv(value) -> list[int] | None:
     return out or None
 
 
+def _parse_pre(value) -> list[dict] | None:
+    """
+    Pré-lembretes armazenados como JSON de objetos. Cada item é:
+      {"type": "offset", "seconds": N}                 -> N segundos antes
+      {"type": "day", "days": D, "hour": H, "minute": M} -> às H:M, D dias antes
+    Compat: aceita também o formato legado (CSV de segundos = offsets).
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    raw = []
+    if s.startswith("["):
+        try:
+            raw = json.loads(s)
+        except Exception:
+            raw = []
+    else:  # legado: CSV de offsets em segundos
+        raw = [int(p) for p in s.split(",") if p.strip().isdigit() and int(p) > 0]
+    out: list[dict] = []
+    for it in raw if isinstance(raw, list) else []:
+        if isinstance(it, (int, float)) and int(it) > 0:
+            out.append({"type": "offset", "seconds": int(it)})
+        elif isinstance(it, dict) and it.get("type") == "offset" and int(it.get("seconds", 0)) > 0:
+            out.append({"type": "offset", "seconds": int(it["seconds"])})
+        elif isinstance(it, dict) and it.get("type") == "day":
+            out.append({
+                "type": "day",
+                "days": max(0, int(it.get("days", 1))),
+                "hour": int(it.get("hour", 9)) % 24,
+                "minute": int(it.get("minute", 0)) % 60,
+            })
+    return out or None
+
+
 class ReminderOut(BaseModel):
     id: str
     title: str
@@ -21,6 +57,8 @@ class ReminderOut(BaseModel):
     days_of_week: list[int] | None = None
     interval_seconds: int | None = None
     end_date: str | None
+    # Pré-lembretes: lista de objetos (offset OU dia anterior às HH:MM).
+    pre_reminders: list[dict] | None = None
     is_active: bool
     created_at: str
 
@@ -34,6 +72,7 @@ class ReminderOut(BaseModel):
             recurrence_str=reminder.recurrence_str,
             days_of_week=_parse_days_csv(getattr(reminder, "days_of_week", None)),
             interval_seconds=getattr(reminder, "interval_seconds", None),
+            pre_reminders=_parse_pre(getattr(reminder, "pre_reminders", None)),
             end_date=reminder.end_date,
             is_active=bool(reminder.is_active),
             created_at=reminder.created_at,
@@ -57,6 +96,8 @@ class ReminderUpdate(BaseModel):
     recurrence: str | None = None
     # intervalo em segundos p/ recurrence=interval_seconds; None = não alterar
     interval_seconds: int | None = None
+    # pré-lembretes (lista de objetos); [] limpa, None = não alterar
+    pre_reminders: list[dict] | None = None
 
 
 class ReminderCreate(BaseModel):
@@ -64,6 +105,8 @@ class ReminderCreate(BaseModel):
     scheduled_time: str  # ISO 8601
     recurrence: str | None = "once"
     days_of_week: list[int] | None = None
+    # pré-lembretes: lista de objetos (offset OU dia anterior às HH:MM)
+    pre_reminders: list[dict] | None = None
 
 
 class ReminderDeleteResponse(BaseModel):

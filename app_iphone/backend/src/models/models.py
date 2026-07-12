@@ -39,6 +39,9 @@ class Reminder(Base):
     # Ex.: "0,1,2,3,4" = segunda a sexta. NULL para os demais tipos.
     days_of_week = Column(String, nullable=True)
     end_date = Column(String, nullable=True)
+    # Pré-lembretes: CSV de offsets em SEGUNDOS antes do disparo (avisos "antes").
+    # Ex.: "604800,3600,1800" = 1 semana, 1h e 30min antes. NULL = nenhum.
+    pre_reminders = Column(String, nullable=True)
     is_active = Column(Integer, nullable=False, default=1)
     created_at = Column(String, nullable=False)
     updated_at = Column(String, nullable=False)
@@ -61,6 +64,8 @@ class ChatHistory(Base):
     content = Column(Text, nullable=False)
     intent = Column(String, nullable=True)
     model_used = Column(String, nullable=True)
+    # Sessão de chat (uma por abertura do app) — contexto da IA por sessão.
+    session_id = Column(String, nullable=True)
     created_at = Column(String, nullable=False)
 
     user = relationship("User", back_populates="chat_history")
@@ -68,6 +73,7 @@ class ChatHistory(Base):
     __table_args__ = (
         Index("idx_chat_history_user_id", "user_id"),
         Index("idx_chat_history_user_created", "user_id", "created_at"),
+        Index("idx_chat_history_session", "user_id", "session_id"),
     )
 
 

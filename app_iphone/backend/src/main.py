@@ -92,6 +92,16 @@ async def _run_migrations() -> None:
         if "days_of_week" not in columns:
             await conn.execute(text("ALTER TABLE reminders ADD COLUMN days_of_week TEXT"))
             logger.info("Migração: coluna reminders.days_of_week adicionada.")
+        if "pre_reminders" not in columns:
+            await conn.execute(text("ALTER TABLE reminders ADD COLUMN pre_reminders TEXT"))
+            logger.info("Migração: coluna reminders.pre_reminders adicionada.")
+
+        # Sessão de chat (contexto da IA por abertura do app).
+        result = await conn.execute(text("PRAGMA table_info(chat_history)"))
+        chat_columns = {row[1] for row in result.fetchall()}
+        if "session_id" not in chat_columns:
+            await conn.execute(text("ALTER TABLE chat_history ADD COLUMN session_id TEXT"))
+            logger.info("Migração: coluna chat_history.session_id adicionada.")
 
         # Scaffolding de push (fase 2) — cria a tabela se ainda não existir.
         await conn.execute(text(

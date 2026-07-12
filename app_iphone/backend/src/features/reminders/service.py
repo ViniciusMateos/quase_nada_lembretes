@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,57 @@ BRT = timezone(timedelta(hours=-3))
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
+
+
+def _pre_to_storage(items) -> str | None:
+    """Normaliza os pré-lembretes (dicts do app ou ints legados da IA) → JSON.
+    Cada item: {"type":"offset","seconds":N} ou {"type":"day","days":D,"hour":H,"minute":M}."""
+    if not isinstance(items, list) or not items:
+        return None
+    out = []
+    for it in items:
+        if isinstance(it, (int, float)) and int(it) > 0:
+            out.append({"type": "offset", "seconds": int(it)})
+        elif isinstance(it, dict):
+            t = it.get("type")
+            if t == "offset" and int(it.get("seconds", 0)) > 0:
+                out.append({"type": "offset", "seconds": int(it["seconds"])})
+            elif t == "day":
+                out.append({
+                    "type": "day",
+                    "days": max(0, int(it.get("days", 1))),
+                    "hour": int(it.get("hour", 9)) % 24,
+                    "minute": int(it.get("minute", 0)) % 60,
+                })
+    return json.dumps(out) if out else None
+
+
+def _pre_specs(value) -> list[dict]:
+    """Parseia o pre_reminders do banco (JSON novo ou CSV legado de segundos)."""
+    if not value:
+        return []
+    s = str(value).strip()
+    if s.startswith("["):
+        try:
+            raw = json.loads(s)
+        except Exception:
+            raw = []
+    else:
+        raw = [int(p) for p in s.split(",") if p.strip().isdigit() and int(p) > 0]
+    out = []
+    for it in raw if isinstance(raw, list) else []:
+        if isinstance(it, (int, float)) and int(it) > 0:
+            out.append({"type": "offset", "seconds": int(it)})
+        elif isinstance(it, dict) and it.get("type") == "offset" and int(it.get("seconds", 0)) > 0:
+            out.append({"type": "offset", "seconds": int(it["seconds"])})
+        elif isinstance(it, dict) and it.get("type") == "day":
+            out.append({
+                "type": "day",
+                "days": max(0, int(it.get("days", 1))),
+                "hour": int(it.get("hour", 9)) % 24,
+                "minute": int(it.get("minute", 0)) % 60,
+            })
+    return out
 
 
 _DIAS_ABREV = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
@@ -263,23 +315,39 @@ def calcular_execucoes_futuras(
     if next_exec.tzinfo is None:
         next_exec = next_exec.replace(tzinfo=timezone.utc)
 
-    executions: list[str] = []
-    current = next_exec
+    # Pré-lembretes: offset ("X antes") ou "dia anterior às HH:MM".
+    pre_specs = _pre_specs(getattr(reminder, "pre_reminders", None))
 
-    while len(executions) < max_per_reminder:
+    mains: list[datetime] = []
+    current = next_exec
+    while len(mains) < max_per_reminder:
         if current > horizon_end:
             break
         if end_date and current > end_date:
             break
         if current >= now:
-            executions.append(current.isoformat())
+            mains.append(current)
 
         next_dt = calcular_proxima_execucao(reminder, current)
         if next_dt is None:
             break
         current = next_dt
 
-    return executions
+    # Junta execuções principais + pré-avisos, dedup e ordena.
+    all_dts: set[datetime] = set(mains)
+    for m in mains:
+        for spec in pre_specs:
+            if spec["type"] == "offset":
+                pre = m - timedelta(seconds=spec["seconds"])
+            else:  # "day": às H:M, D dias antes do disparo, no fuso de Brasília
+                m_brt = m.astimezone(BRT) - timedelta(days=spec["days"])
+                pre = m_brt.replace(
+                    hour=spec["hour"], minute=spec["minute"], second=0, microsecond=0
+                ).astimezone(timezone.utc)
+            if now <= pre <= horizon_end:
+                all_dts.add(pre)
+
+    return [d.isoformat() for d in sorted(all_dts)]
 
 
 async def list_reminders(
@@ -356,6 +424,9 @@ async def update_reminder(
     if data.title is not None:
         update_values["title"] = data.title
         update_values["title_normalized"] = _normalize(data.title)
+
+    if data.pre_reminders is not None:
+        update_values["pre_reminders"] = _pre_to_storage(data.pre_reminders)
 
     # Horário base: scheduled_time enviado nesta edição, senão o next_execution atual.
     if data.scheduled_time is not None:
@@ -488,6 +559,7 @@ async def create_reminder_from_data(
     titulo = dados.get("titulo", "Sem título")
     days = _parse_days(dados.get("days_of_week"))
     days_csv = ",".join(str(d) for d in days) if days else None
+    pre_csv = _pre_to_storage(dados.get("pre_lembretes"))
 
     recurrence_str = _recurrence_label(recurrence, days, interval_seconds)
 
@@ -501,6 +573,7 @@ async def create_reminder_from_data(
         recurrence=recurrence,
         recurrence_str=recurrence_str,
         days_of_week=days_csv,
+        pre_reminders=pre_csv,
         end_date=end_date_raw,
         is_active=1,
         created_at=now_iso,
@@ -531,6 +604,8 @@ async def create_reminder_api(
     }
     if data.days_of_week:
         dados["days_of_week"] = data.days_of_week
+    if data.pre_reminders:
+        dados["pre_lembretes"] = data.pre_reminders
     reminder = await create_reminder_from_data(db, user_id, dados)
     await db.commit()
     fresh = await get_reminder_by_id(db, reminder.id)
