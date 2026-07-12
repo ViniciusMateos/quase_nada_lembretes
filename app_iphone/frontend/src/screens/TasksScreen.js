@@ -108,7 +108,7 @@ export default function TasksScreen({ navigation }) {
       onPanResponderRelease: (_, g) => {
         if (g.dx < -80) {
           Animated.timing(swipeTranslateX, { toValue: -screenWidth, duration: 180, useNativeDriver: true })
-            .start(() => { swipeTranslateX.setValue(0); navigation.navigate('Chat'); });
+            .start(() => { navigation.navigate('Chat'); requestAnimationFrame(() => swipeTranslateX.setValue(0)); });
           animateTabTo(1);
           return;
         }
@@ -303,15 +303,9 @@ export default function TasksScreen({ navigation }) {
                   scrollEnabled={!isDragging}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={[styles.listContent, { paddingBottom: tabClear }]}
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={isRefreshing}
-                      onRefresh={handleRefresh}
-                      tintColor="transparent"
-                      colors={['transparent']}
-                      progressBackgroundColor="transparent"
-                    />
-                  }
+                  onScrollEndDrag={e => {
+                    if (e.nativeEvent.contentOffset.y < -70 && !isRefreshing) handleRefresh();
+                  }}
                 >
                   <WeekNavigator
                     currentDate={currentDate}

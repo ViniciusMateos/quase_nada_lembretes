@@ -24,6 +24,7 @@ import { enqueueMessage, drainQueue } from '../services/messageQueue';
 import { detectIs12h } from '../utils/timeFormat';
 import { formatTodayLabel } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
+import { onCompose } from '../utils/composeIntent';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import MessageBubble from '../components/MessageBubble';
@@ -98,8 +99,8 @@ export default function ChatScreen({ navigation }) {
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            swipeTranslateX.setValue(0);
             navigation.navigate('Lembretes');
+            requestAnimationFrame(() => swipeTranslateX.setValue(0));
           });
           animateTabTo(2);
           return;
@@ -110,8 +111,8 @@ export default function ChatScreen({ navigation }) {
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            swipeTranslateX.setValue(0);
             navigation.navigate('Tarefas');
+            requestAnimationFrame(() => swipeTranslateX.setValue(0));
           });
           animateTabTo(0);
           return;
@@ -149,6 +150,11 @@ export default function ChatScreen({ navigation }) {
   const [hasNotifPermission, setHasNotifPermission] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const canSend = inputText.trim().length > 0 && !isLoading;
+
+  // Deep link / widget "clique para ser lembrado" → foca o input (abre teclado).
+  useEffect(() => onCompose(() => {
+    setTimeout(() => inputRef.current?.focus(), 150);
+  }), []);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
