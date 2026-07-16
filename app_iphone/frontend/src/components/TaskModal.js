@@ -14,33 +14,97 @@ import {
   View,
 } from 'react-native';
 import LoadingDog from './LoadingDog';
+import PressableScale from './PressableScale';
+import { useI18n } from '../i18n';
 
-// Prioridades e cores — espelham o site (vermelho/amarelo/verde).
-export const PRIORITIES = [
-  { key: 'high', label: 'Alta', color: '#EF4444' },
-  { key: 'medium', label: 'Média', color: '#F59E0B' },
-  { key: 'low', label: 'Baixa', color: '#22C55E' },
-];
+// Cores das prioridades — espelham o site (vermelho/amarelo/verde).
+export const PRIORITY_COLORS = { high: '#EF4444', medium: '#F59E0B', low: '#22C55E' };
+
+// Função, não constante: os rótulos precisam ser resolvidos a cada render, senão
+// congelariam no idioma vigente no momento do import.
+export function getPriorities(t) {
+  return [
+    { key: 'high', label: t('tasks.priority.high'), color: PRIORITY_COLORS.high },
+    { key: 'medium', label: t('tasks.priority.medium'), color: PRIORITY_COLORS.medium },
+    { key: 'low', label: t('tasks.priority.low'), color: PRIORITY_COLORS.low },
+  ];
+}
 
 export default function TaskModal({ visible, task, initialName, onSave, onClose, theme }) {
+  const { t, lang, progresso } = useI18n();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const [name, setName] = useState('');
-  const [priority, setPriority] = useState('medium');
-  const [notes, setNotes] = useState('');
+  const priorities = useMemo(() => getPriorities(t), [t, lang, progresso]);
+  // Estado inicializado DIRETO do task. Isto só funciona porque o pai remonta o
+  // modal a cada abertura (key={...} no TaskModal): num componente novo, o
+  // initializer do useState roda de novo e lê o task fresco. Era a causa de "o
+  // título muda, a descrição não": um TextInput multiline controlado não repinta
+  // quando o value é trocado por código. Nascendo com o valor certo, some o bug.
+  const [name, setName] = useState(task?.name || initialName || '');
+  const [priority, setPriority] = useState(task?.priority || 'medium');
+  const [notes, setNotes] = useState(task?.notes || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [kbHeight, setKbHeight] = useState(0);
 
+  // O sheet fica ancorado no rodapé e o teclado sobe POR CIMA dele — quem
+  // empurra o conteúdo é o automaticallyAdjustKeyboardInsets do ScrollView.
   const sheetTranslateY = useRef(new Animated.Value(400)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
-  const keyboardOffset = useRef(new Animated.Value(0)).current;
+  const scrollRef = useRef(null);
+  const scrollYRef = useRef(0);
+
+  // Altura mínima do sheet. Fechado, ele tem a altura do conteúdo (compacto).
+  // Com o teclado aberto, cresce pra ocupar TUDO que sobra acima dele — senão o
+  // campo de anotações fica espremido numa fresta, que é o que incomodava.
+  // Volta sozinho quando o teclado desce.
+  const minAltura = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    const alturaTela = Dimensions.get('window').height;
+
+    const mostrar = Keyboard.addListener('keyboardWillShow', e => {
+      // 24 de folga entre o topo do sheet e o topo da tela.
+      const disponivel = alturaTela - e.endCoordinates.height - 24;
+      Animated.timing(minAltura, {
+        toValue: Math.max(0, disponivel),
+        duration: e.duration || 250,
+        useNativeDriver: false, // minHeight é layout: não existe no driver nativo
+      }).start();
+    });
+
+    const esconder = Keyboard.addListener('keyboardWillHide', e => {
+      Animated.timing(minAltura, {
+        toValue: 0,
+        duration: e.duration || 250,
+        useNativeDriver: false,
+      }).start();
+    });
+
+    return () => { mostrar.remove(); esconder.remove(); };
+  }, [visible, minAltura]);
+
+  // O teclado nativo cola o campo focado na sua borda — dá um respiro. O delay
+  // curto faz o empurrão andar junto com a animação de abrir o teclado.
+  const nudgeAboveKeyboard = () => {
+    setTimeout(() => scrollRef.current?.scrollTo({ y: scrollYRef.current + 28, animated: true }), 120);
+  };
+
+  // Ao focar as anotações, leva o CAMPO pro alto da área visível (não só um
+  // empurrãozinho): como ele cresce pra baixo com o texto, começar lá em cima dá
+  // o máximo de espaço antes de precisar rolar.
+  const notesRef = useRef(null);
+  const notesYRef = useRef(0);
+  const revealNotes = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, notesYRef.current - 12), animated: true });
+    }, 180); // espera o teclado começar a subir
+  };
 
   // Anima o sheet descendo + overlay sumindo e então dispara o callback (fechar).
   // Usado tanto no cancelar/arrastar quanto ao salvar com sucesso — assim a
   // tela "volta" com o modal descendo em vez de sumir seco.
   const animateOut = cb => {
     Keyboard.dismiss();
-    keyboardOffset.setValue(0);
     Animated.parallel([
       Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
       Animated.timing(sheetTranslateY, { toValue: 520, duration: 280, useNativeDriver: true }),
@@ -64,46 +128,34 @@ export default function TaskModal({ visible, task, initialName, onSave, onClose,
     }),
   ).current;
 
+  // Só a animação de entrada. Os campos NÃO são preenchidos aqui — já nascem com
+  // o valor certo (useState inicializado do task), porque o pai remonta o modal
+  // a cada abertura. Reintroduzir setNotes aqui traria de volta o bug do buffer.
   useEffect(() => {
     if (visible) {
-      setName(task?.name || initialName || '');
-      setPriority(task?.priority || 'medium');
-      setNotes(task?.notes || '');
-      setError(null);
-      setIsSaving(false);
       sheetTranslateY.setValue(400);
       overlayOpacity.setValue(0);
-      keyboardOffset.setValue(0);
       Animated.parallel([
         Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
         Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, tension: 68, friction: 11 }),
       ]).start();
     }
-  }, [visible, task, sheetTranslateY, overlayOpacity, keyboardOffset]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const show = Keyboard.addListener('keyboardWillShow', e => {
-      setKbHeight(e.endCoordinates.height);
-      Animated.timing(keyboardOffset, { toValue: -e.endCoordinates.height, duration: e.duration || 250, useNativeDriver: true }).start();
-    });
-    const hide = Keyboard.addListener('keyboardWillHide', e => {
-      setKbHeight(0);
-      Animated.timing(keyboardOffset, { toValue: 0, duration: e.duration || 250, useNativeDriver: true }).start();
-    });
-    return () => { show.remove(); hide.remove(); };
-  }, [visible, keyboardOffset]);
+  }, [visible, task, sheetTranslateY, overlayOpacity]);
 
   const handleClose = () => animateOut(onClose);
 
   const handleSave = async () => {
     if (!name.trim()) {
-      setError('Nome é obrigatório');
+      // Flag em vez do texto: o rótulo é resolvido no render e acompanha o idioma.
+      setError('required');
       return;
     }
     setIsSaving(true);
     try {
-      await onSave({ name: name.trim(), priority, notes: notes.trim() || null });
+      // notes SEMPRE como string (mesmo vazia), nunca null. O backend só grava
+      // quando `notes is not None` — mandar null ao apagar tudo fazia ele IGNORAR
+      // a limpeza e manter o texto velho. String vazia esvazia de verdade.
+      await onSave({ name: name.trim(), priority, notes: notes.trim() });
       // Sucesso → desce o modal mostrando a aba de volta.
       animateOut(onClose);
     } catch (e) {
@@ -116,41 +168,59 @@ export default function TaskModal({ visible, task, initialName, onSave, onClose,
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <Animated.View style={[styles.sheet, kbHeight > 0 && { maxHeight: Dimensions.get('window').height - kbHeight - 70 }, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
           <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
           </View>
 
+          {/* O minHeight animado vai num nó SEPARADO do transform de propósito:
+              transform roda no driver nativo, e basta uma prop nativa pra que o
+              Animated.View inteiro migre pra lá — aí minHeight (que é layout, e
+              não existe no módulo nativo) quebra com "Style property 'minHeight'
+              is not supported by native animated module". Mesma armadilha do
+              height no AnimatedExpand. Um nó por driver. */}
+          <Animated.View style={{ minHeight: minAltura }}>
           <ScrollView
+            ref={scrollRef}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets
+            scrollEventThrottle={16}
+            onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
           >
-            <Text style={styles.sheetTitle}>{task ? 'Editar tarefa' : 'Nova tarefa'}</Text>
+            <Text style={styles.sheetTitle}>{task ? t('tasks.modal.editTitle') : t('tasks.modal.newTitle')}</Text>
 
-            <Text style={styles.label}>Nome da tarefa</Text>
+            <Text style={styles.label}>{t('tasks.modal.nameLabel')}</Text>
             <TextInput
               style={[styles.input, error && styles.inputError]}
               value={name}
               onChangeText={text => { setName(text); if (error) setError(null); }}
-              placeholder="O que precisa ser feito?"
+              placeholder={t('tasks.modal.namePlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
               autoCapitalize="sentences"
               editable={!isSaving}
             />
-            {error ? <Text style={styles.fieldError}>{error}</Text> : null}
+            {error ? <Text style={styles.fieldError}>{t('tasks.modal.nameRequired')}</Text> : null}
 
-            <Text style={[styles.label, { marginTop: 14 }]}>Prioridade</Text>
+            <Text style={[styles.label, { marginTop: 14 }]}>{t('tasks.modal.priorityLabel')}</Text>
             <View style={styles.priorityRow}>
-              {PRIORITIES.map(p => {
+              {priorities.map(p => {
                 const active = priority === p.key;
                 return (
-                  <Pressable
-                    key={p.key}
-                    style={({ pressed }) => [
+                  // O flex:1 (que faz os três dividirem a linha) fica no wrapper,
+                  // e o PressableScale usa o modo padrão — com o estilo do pill na
+                  // View interna, que é a que recebe a escala.
+                  //
+                  // Com applyStyleToRoot era o contrário: o fundo/borda ficavam na
+                  // raiz (sem escala) e só o conteúdo encolhia. Animava, mas o que
+                  // se movia era invisível.
+                  <View key={p.key} style={styles.prioritySlot}>
+                  <PressableScale
+                    style={[
                       styles.priorityPill,
+                      styles.priorityContent,
                       active && { backgroundColor: p.color, borderColor: p.color },
-                      pressed && { opacity: 0.7 },
                     ]}
                     onPress={() => setPriority(p.key)}
                     disabled={isSaving}
@@ -159,36 +229,46 @@ export default function TaskModal({ visible, task, initialName, onSave, onClose,
                     <Text style={[styles.priorityPillText, active && styles.priorityPillTextActive]}>
                       {p.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
+                  </View>
                 );
               })}
             </View>
 
-            <Text style={[styles.label, { marginTop: 14 }]}>Anotações</Text>
+            <Text
+              style={[styles.label, { marginTop: 14 }]}
+              onLayout={e => { notesYRef.current = e.nativeEvent.layout.y; }}
+            >
+              {t('tasks.modal.notesLabel')}
+            </Text>
             <TextInput
+              ref={notesRef}
               style={[styles.input, styles.notesInput]}
               value={notes}
               onChangeText={setNotes}
-              placeholder="Descreva aqui... (opcional)"
+              placeholder={t('tasks.modal.notesPlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
+              onFocus={revealNotes}
               multiline
+              scrollEnabled={false}
               textAlignVertical="top"
               editable={!isSaving}
             />
 
             <View style={styles.buttons}>
               <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
-                <Text style={[styles.btnText, styles.btnCancelText]}>Cancelar</Text>
+                <Text style={[styles.btnText, styles.btnCancelText]}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnSave]} onPress={handleSave} disabled={isSaving}>
                 {isSaving ? (
                   <LoadingDog size={28} color="#FFFFFF" />
                 ) : (
-                  <Text style={[styles.btnText, styles.btnSaveText]}>Salvar</Text>
+                  <Text style={[styles.btnText, styles.btnSaveText]}>{t('common.save')}</Text>
                 )}
               </TouchableOpacity>
             </View>
           </ScrollView>
+          </Animated.View>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -207,7 +287,7 @@ function makeStyles(theme) {
       backgroundColor: theme.surface,
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
-      maxHeight: Dimensions.get('window').height * 0.88,
+      maxHeight: Dimensions.get('window').height * 0.94,
     },
     handleArea: { paddingTop: 14, paddingBottom: 16, alignItems: 'center' },
     handle: { width: 48, height: 5, backgroundColor: theme.border, borderRadius: 3 },
@@ -238,7 +318,7 @@ function makeStyles(theme) {
       color: theme.textPrimary,
       fontFamily: 'System',
     },
-    notesInput: { minHeight: 110, maxHeight: 220, paddingTop: 12 },
+    notesInput: { minHeight: 120, paddingTop: 12 },
     inputError: { borderColor: theme.error },
     fieldError: {
       color: theme.error,
@@ -248,17 +328,19 @@ function makeStyles(theme) {
       fontFamily: 'System',
     },
     priorityRow: { flexDirection: 'row', gap: 8 },
+    prioritySlot: { flex: 1 },
     priorityPill: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
       paddingVertical: 11,
       borderRadius: 22,
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surface2,
+    },
+    priorityContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
     },
     priorityDot: { width: 8, height: 8, borderRadius: 4 },
     priorityPillText: {

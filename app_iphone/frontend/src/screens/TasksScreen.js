@@ -5,19 +5,22 @@ import {
   Dimensions,
   PanResponder,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+// SafeAreaView do safe-area-context: só o topo é protegido, pra lista descer
+// até o fim da tela e passar por trás do tab bar.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import useFocusEntrance from '../hooks/useFocusEntrance';
 import { listTasks, createTask, updateTask, deleteTask } from '../api/tasks.api';
 import { getWeekKey, formatTodayLabel } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
 import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../i18n';
 import LoadingDog from '../components/LoadingDog';
 import ConfirmDialog from '../components/ConfirmDialog';
 import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
@@ -47,6 +50,7 @@ function sortTasks(list) {
 
 export default function TasksScreen({ navigation }) {
   const { theme } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const tabClear = useTabBarClearance();
   const entrance = useFocusEntrance(0);
@@ -62,7 +66,15 @@ export default function TasksScreen({ navigation }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
+  // Guarda só o ID, não o objeto. A tarefa em edição é DERIVADA do `tasks` atual
+  // (logo abaixo) — então ela é sempre a versão mais fresca por construção. Antes
+  // guardávamos o objeto num snapshot, que ficava velho quando um toque entregava
+  // uma cópia congelada (PanResponder). Sem objeto guardado, não há o que ficar
+  // velho: quando o save atualiza `tasks`, a derivada aponta pro novo na hora.
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  // Bump a cada abertura do modal; vira a `key` do TaskModal pra forçar remount.
+  const [openNonce, setOpenNonce] = useState(0);
+  const editingTask = editingTaskId ? tasks.find(x => x.id === editingTaskId) || null : null;
   const [deletingTask, setDeletingTask] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -130,7 +142,8 @@ export default function TasksScreen({ navigation }) {
       setTasks(sortTasks(data.tasks || []));
       hasLoadedRef.current = true;
     } catch (err) {
-      setError('Erro ao carregar tarefas. Puxe para atualizar.');
+      // Guarda só o flag: o texto é resolvido no render, então acompanha a troca de idioma.
+      setError('load');
       console.warn('[TasksScreen] Erro ao carregar:', err);
     } finally {
       setIsLoading(false);
@@ -158,7 +171,7 @@ export default function TasksScreen({ navigation }) {
   };
 
   const handleRefresh = () => { setIsRefreshing(true); fetchTasks(weekKey, true); };
-  const openNew = () => { setEditingTask(null); setModalVisible(true); };
+  const openNew = () => { setOpenNonce(n => n + 1); setEditingTaskId(null); setModalVisible(true); };
 
   const handleSave = async ({ name, priority, notes }) => {
     if (editingTask) {
@@ -176,7 +189,7 @@ export default function TasksScreen({ navigation }) {
     try {
       await updateTask(task.id, { completed: next, week_key: weekKey });
     } catch (err) {
-      Alert.alert('Erro', 'Não foi possível atualizar a tarefa.');
+      Alert.alert(t('common.error'), t('tasks.updateError'));
       fetchTasks(weekKey, true);
       console.warn('[TasksScreen] Erro ao concluir:', err);
     }
@@ -188,7 +201,7 @@ export default function TasksScreen({ navigation }) {
     setDeletingTask(null);
     setRemovingId(task.id);
     deleteTask(task.id).catch(err => {
-      Alert.alert('Erro', 'Não foi possível excluir a tarefa.');
+      Alert.alert(t('common.error'), t('tasks.deleteError'));
       setRemovingId(null);
       fetchTasks(weekKey, true);
       console.warn('[TasksScreen] Erro ao excluir:', err);
@@ -227,7 +240,14 @@ export default function TasksScreen({ navigation }) {
     });
   };
 
-  const openEdit = task => { setEditingTask(task); setModalVisible(true); };
+  // Resolve a tarefa FRESCA do estado atual (tasksRef) por id. O toque na linha
+  // passa por um PanResponder criado uma vez, que entrega uma versão velha do
+  // objeto — sem esta busca, reabrir logo após salvar mostrava os dados antigos.
+  const openEdit = task => {
+    setOpenNonce(n => n + 1);
+    setEditingTaskId(task.id);
+    setModalVisible(true);
+  };
 
   // Segurar a tarefa parado → abre o modal de lembrete já com o nome da tarefa.
   const onCreateReminder = task => {
@@ -242,7 +262,7 @@ export default function TasksScreen({ navigation }) {
     try {
       await createReminder(payload);
     } catch (err) {
-      Alert.alert('Erro', 'Não foi possível criar o lembrete.');
+      Alert.alert(t('common.error'), t('tasks.reminderError'));
       console.warn('[TasksScreen] criar lembrete:', err);
       return;
     }
@@ -253,7 +273,7 @@ export default function TasksScreen({ navigation }) {
     } catch (err) {
       console.warn('[TasksScreen] sync após criar lembrete:', err);
     }
-    Alert.alert('Pronto', 'Lembrete criado a partir da tarefa!');
+    Alert.alert(t('tasks.reminderDoneTitle'), t('tasks.reminderDone'));
   };
 
   return (
@@ -262,13 +282,13 @@ export default function TasksScreen({ navigation }) {
         style={[styles.swipePage, { opacity: entrance.opacity, transform: [...entrance.transform, { translateX: swipeTranslateX }] }]}
         {...panResponder.panHandlers}
       >
-        <SafeAreaView style={{ flex: 1 }}>
+        <SafeAreaView edges={['top']} style={{ flex: 1 }}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Tarefas</Text>
+            <Text style={styles.headerTitle}>{t('tasks.title')}</Text>
             <PressableScale
               onPress={() => setMenuVisible(true)}
               hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}
-              accessibilityLabel="Menu"
+              accessibilityLabel={t('chat.menuA11y')}
               accessibilityRole="button"
             >
               <HamburgerIcon />
@@ -281,16 +301,16 @@ export default function TasksScreen({ navigation }) {
             </View>
           ) : error ? (
             <View style={styles.centered}>
-              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorText}>{t('tasks.loadError')}</Text>
               <TouchableOpacity style={styles.retryButton} onPress={() => fetchTasks(weekKey)}>
-                <Text style={styles.retryButtonText}>Tentar novamente</Text>
+                <Text style={styles.retryButtonText}>{t('tasks.retry')}</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <>
               <View style={styles.dateBlock}>
                 <Text style={styles.todayDate}>{formatTodayLabel()}</Text>
-                <Text style={styles.editHint}>Clique para editar · segure para reordenar ou criar lembrete</Text>
+                <Text style={styles.editHint}>{t('tasks.hint')}</Text>
               </View>
 
               <View style={styles.listWrap}>
@@ -314,16 +334,16 @@ export default function TasksScreen({ navigation }) {
                     theme={theme}
                   />
                   <View style={styles.newBtnWrap}>
-                    <PressableScale style={styles.newBtn} onPress={openNew} accessibilityRole="button" accessibilityLabel="Nova tarefa">
-                      <Text style={styles.newBtnText}>+ Nova Tarefa</Text>
+                    <PressableScale style={styles.newBtn} onPress={openNew} accessibilityRole="button" accessibilityLabel={t('tasks.newA11y')}>
+                      <Text style={styles.newBtnText}>{t('tasks.new')}</Text>
                     </PressableScale>
                   </View>
 
                   <Animated.View style={{ opacity: contentOp, transform: [{ translateX: contentTX }] }}>
                     {tasks.length === 0 ? (
                       <View style={styles.emptyBox}>
-                        <Text style={styles.emptyText}>Sem tarefas para esta semana.</Text>
-                        <Text style={styles.emptySubtext}>Toque em "+ Nova Tarefa" para começar.</Text>
+                        <Text style={styles.emptyText}>{t('tasks.empty')}</Text>
+                        <Text style={styles.emptySubtext}>{t('tasks.emptySub')}</Text>
                       </View>
                     ) : (
                       <SortableTaskList
@@ -346,10 +366,15 @@ export default function TasksScreen({ navigation }) {
           )}
 
           <TaskModal
+            // key muda a cada abertura → o modal REMONTA do zero, e seus campos
+            // (useState inicializado do task) nascem com o valor fresco. É o que
+            // mata de vez o "descrição não atualiza": componente novo, sem estado
+            // velho e sem buffer nativo dessincronizado.
+            key={openNonce}
             visible={modalVisible}
             task={editingTask}
             onSave={handleSave}
-            onClose={() => { setModalVisible(false); setEditingTask(null); }}
+            onClose={() => { setModalVisible(false); setEditingTaskId(null); }}
             theme={theme}
           />
           <ReminderFormModal
@@ -362,9 +387,9 @@ export default function TasksScreen({ navigation }) {
           />
           <ConfirmDialog
             visible={!!deletingTask}
-            title="Excluir tarefa"
-            message={deletingTask ? `Deseja excluir "${deletingTask.name}"?` : ''}
-            confirmText="Excluir"
+            title={t('tasks.deleteTitle')}
+            message={deletingTask ? t('tasks.deleteMessage', { name: deletingTask.name }) : ''}
+            confirmText={t('common.delete')}
             destructive
             onCancel={() => setDeletingTask(null)}
             onConfirm={confirmDelete}

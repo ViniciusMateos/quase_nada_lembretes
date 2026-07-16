@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useI18n } from '../i18n';
 
 export const ROW_H = 64; // altura fixa de cada linha (base do cálculo do drag)
 const PRIORITY_COLORS = { high: '#EF4444', medium: '#F59E0B', low: '#22C55E' };
@@ -21,6 +22,7 @@ function SortableRow({
   removing,
   onExited,
 }) {
+  const { t } = useI18n();
   const styles = useMemo(() => makeItemStyles(theme), [theme]);
   const color = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium;
 
@@ -32,6 +34,18 @@ function SortableRow({
 
   const indexRef = useRef(index);
   indexRef.current = index;
+  // O PanResponder abaixo é criado UMA vez (useRef) e congela TUDO que estava no
+  // ar naquele render: a `task` E os callbacks (onEdit etc.). Sem estes refs,
+  // editar e reabrir mostrava dados antigos — o handler do toque segurava a
+  // versão velha da tarefa e chamava a versão velha do onEdit.
+  //
+  // Todos os handlers passam por um ref "vivo" (handlersRef), atualizado a cada
+  // render. Assim o PanResponder sempre chama a versão MAIS RECENTE, e não
+  // depende de reload (que em dev recriaria o PanResponder e em prod nem existe).
+  const taskRef = useRef(task);
+  taskRef.current = task;
+  const handlersRef = useRef({});
+  handlersRef.current = { onEdit, onDelete, onToggle, onCreateReminder, onReorder };
   const drag = useRef({ active: false, moved: false, timer: null, from: 0, base: 0, gStart: 0, gEnd: 0, hover: 0 }).current;
 
   useEffect(() => {
@@ -63,7 +77,7 @@ function SortableRow({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
         Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, tension: 300, friction: 12 }).start();
-        if (task.completed) return;
+        if (taskRef.current.completed) return;
         drag.timer = setTimeout(() => {
           const list = tasksRef.current;
           const i = indexRef.current;
@@ -117,16 +131,16 @@ function SortableRow({
           draggingIdRef.current = null;
           Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
           if (wasMoved) {
-            if (target !== from) onReorder(from, target);
+            if (target !== from) handlersRef.current.onReorder(from, target);
             else resetToSlot();
           } else {
             // segurou parado e soltou → criar lembrete a partir da tarefa
             resetToSlot();
-            onCreateReminder?.(task);
+            handlersRef.current.onCreateReminder?.(taskRef.current);
           }
         } else {
           Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
-          if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) onEdit(task);
+          if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) handlersRef.current.onEdit(taskRef.current);
         }
       },
       onPanResponderTerminate: () => {
@@ -164,7 +178,7 @@ function SortableRow({
           ]}
           pointerEvents="none"
         >
-          <Text style={styles.hintBalloonText}>Soltar para criar lembrete</Text>
+          <Text style={styles.hintBalloonText}>{t('tasks.dropToRemind')}</Text>
         </Animated.View>
       )}
       <View style={[styles.item, { borderLeftColor: color, backgroundColor: color + '14' }, task.completed && styles.itemCompleted]}>
@@ -187,7 +201,7 @@ function SortableRow({
           onPress={() => onDelete(task)}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          accessibilityLabel={`Excluir tarefa ${task.name}`}
+          accessibilityLabel={t('tasks.deleteA11y', { name: task.name })}
         >
           <Text style={styles.deleteX}>✕</Text>
         </TouchableOpacity>
