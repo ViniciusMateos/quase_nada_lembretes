@@ -14,4 +14,12 @@ module.exports = {
   type: 'notification-content',
   name: 'ResumoNotif',
   deploymentTarget: '17.0',
+  // Gera o Assets.xcassets da extensão — vira UIImage(named: "logo") no Swift.
+  images: {
+    logo: '../../assets/logo.png',
+  },
+  // A categoria da extensão (UNNotificationExtensionCategory) NÃO é configurável
+  // por aqui: o plugin ignora `infoPlist` e só escreve o Info.plist do template
+  // se ele não existir. Por isso o Info.plist mora ao lado deste arquivo, escrito
+  // à mão, com as categorias 'lembrete' e 'resumo'. Não recriar via config.
 };

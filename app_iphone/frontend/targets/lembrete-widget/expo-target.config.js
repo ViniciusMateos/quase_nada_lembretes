@@ -11,5 +11,15 @@ module.exports = {
   colors: {
     $accent: '#0A84FF',
   },
+  // Gera o Assets.xcassets do target — vira Image("logo") no Swift.
+  // É a logo oficial (cachorro no círculo), não o apenas-cachorro do LoadingDog.
+  images: {
+    logo: '../../assets/logo.png',
+  },
+  // Mesmo App Group do app: é por aqui que o widget de lista lê os próximos
+  // lembretes que o app gravou (via ExtensionStorage no JS).
+  entitlements: {
+    'com.apple.security.application-groups': ['group.com.quasenada.lembretes'],
+  },
   deploymentTarget: '17.0',
 };

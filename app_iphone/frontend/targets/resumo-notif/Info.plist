@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- Casa com o categoryId das notificações (notifications.js):
+			     'lembrete' = o disparo real, 'resumo' = a notificação-resumo.
+			     O template do plugin vinha com "myNotificationCategory", que não
+			     batia com nada — por isso a UI custom nunca aparecia. -->
+			<key>UNNotificationExtensionCategory</key>
+			<array>
+				<string>lembrete</string>
+				<string>resumo</string>
+			</array>
+			<key>UNNotificationExtensionInitialContentSizeRatio</key>
+			<real>0.55</real>
+			<!-- Esconde o corpo padrão do iOS e deixa só a nossa UI. -->
+			<key>UNNotificationExtensionDefaultContentHidden</key>
+			<true/>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.usernotifications.content-extension</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).NotificationViewController</string>
+	</dict>
+</dict>
+</plist>
