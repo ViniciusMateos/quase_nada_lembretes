@@ -115,13 +115,20 @@ class ReminderDeleteResponse(BaseModel):
     deleted: bool = True
 
 
+class PreAviso(BaseModel):
+    at: str            # quando o pré-aviso dispara
+    target: str        # o disparo real ao qual ele se refere
+    lead_seconds: int  # antecedência — vira "daqui a 2 dias" / "daqui a 30 minutos"
+
+
 class ScheduledExecution(BaseModel):
     id: str
     title: str
     recurrence: str | None = None
     recurrence_str: str | None
     is_active: bool
-    scheduled_executions: list[str]
+    scheduled_executions: list[str]   # só os disparos reais
+    pre_executions: list[PreAviso] = []
 
 
 class SyncResponse(BaseModel):

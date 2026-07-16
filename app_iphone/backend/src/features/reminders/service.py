@@ -290,15 +290,12 @@ def calcular_proxima_execucao(reminder: Reminder, from_datetime: datetime) -> da
     return next_dt
 
 
-def calcular_execucoes_futuras(
+def _execucoes_principais(
     reminder: Reminder,
     horizon_days: int,
     max_per_reminder: int,
-) -> list[str]:
-    """
-    Generate a list of future ISO 8601 execution timestamps for the /sync endpoint.
-    Respects end_date and is_active flag.
-    """
+) -> list[datetime]:
+    """Disparos reais do lembrete (sem os pré-avisos), dentro do horizonte."""
     if not reminder.is_active:
         return []
 
@@ -315,9 +312,6 @@ def calcular_execucoes_futuras(
     if next_exec.tzinfo is None:
         next_exec = next_exec.replace(tzinfo=timezone.utc)
 
-    # Pré-lembretes: offset ("X antes") ou "dia anterior às HH:MM".
-    pre_specs = _pre_specs(getattr(reminder, "pre_reminders", None))
-
     mains: list[datetime] = []
     current = next_exec
     while len(mains) < max_per_reminder:
@@ -333,8 +327,47 @@ def calcular_execucoes_futuras(
             break
         current = next_dt
 
-    # Junta execuções principais + pré-avisos, dedup e ordena.
-    all_dts: set[datetime] = set(mains)
+    return mains
+
+
+def calcular_execucoes_futuras(
+    reminder: Reminder,
+    horizon_days: int,
+    max_per_reminder: int,
+) -> list[str]:
+    """
+    Disparos reais do lembrete, em ISO 8601, para o /sync.
+
+    Os pré-avisos saem separados em `calcular_pre_avisos`: misturados aqui, o app
+    não conseguia distinguir um do outro e mandava a mesma notificação nos dois
+    casos — e o resumo diário ainda contava pré-aviso como se fosse lembrete.
+    """
+    return [d.isoformat() for d in _execucoes_principais(reminder, horizon_days, max_per_reminder)]
+
+
+def calcular_pre_avisos(
+    reminder: Reminder,
+    horizon_days: int,
+    max_per_reminder: int,
+) -> list[dict]:
+    """
+    Pré-avisos ("me avise antes") como {at, target, lead_seconds}.
+
+    `lead_seconds` é a antecedência real em relação ao disparo — é com ela que o
+    app escreve "daqui a 2 dias" / "daqui a 3 horas" / "daqui a 30 minutos".
+    """
+    if not reminder.is_active:
+        return []
+
+    pre_specs = _pre_specs(getattr(reminder, "pre_reminders", None))
+    if not pre_specs:
+        return []
+
+    now = datetime.now(timezone.utc)
+    horizon_end = now + timedelta(days=horizon_days)
+    mains = _execucoes_principais(reminder, horizon_days, max_per_reminder)
+
+    avisos: dict[datetime, dict] = {}
     for m in mains:
         for spec in pre_specs:
             if spec["type"] == "offset":
@@ -344,10 +377,19 @@ def calcular_execucoes_futuras(
                 pre = m_brt.replace(
                     hour=spec["hour"], minute=spec["minute"], second=0, microsecond=0
                 ).astimezone(timezone.utc)
-            if now <= pre <= horizon_end:
-                all_dts.add(pre)
+            if not (now <= pre <= horizon_end):
+                continue
+            # Dedup por instante: se dois specs caem no mesmo minuto, fica o que
+            # aponta pro disparo mais próximo.
+            atual = avisos.get(pre)
+            if atual is None or m < datetime.fromisoformat(atual["target"]):
+                avisos[pre] = {
+                    "at": pre.isoformat(),
+                    "target": m.isoformat(),
+                    "lead_seconds": int((m - pre).total_seconds()),
+                }
 
-    return [d.isoformat() for d in sorted(all_dts)]
+    return [avisos[k] for k in sorted(avisos)]
 
 
 async def list_reminders(
@@ -523,6 +565,7 @@ async def sync_reminders(
             recurrence_str=r.recurrence_str,
             is_active=bool(r.is_active),
             scheduled_executions=calcular_execucoes_futuras(r, horizon_days, max_per_reminder),
+            pre_executions=calcular_pre_avisos(r, horizon_days, max_per_reminder),
         )
         for r in reminders
     ]
