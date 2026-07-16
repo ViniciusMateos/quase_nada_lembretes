@@ -11,6 +11,26 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.5.0] - 2026-07-16
+
+### Added
+- App **bilíngue (português / inglês)**: idioma da interface escolhido por um toggle no menu, sem traduzir o conteúdo do usuário (título de lembrete/tarefa) nem o chat (a IA responde em português). O formato de hora (12h/24h) continua vindo do aparelho, não do idioma. A troca de idioma embaralha as letras (scramble) na transição.
+- **Widgets nativos** (WidgetKit via `@bacons/apple-targets`): atalho "Criar lembrete", próximo lembrete na tela de bloqueio e a lista de próximos (em azul ou neutro), lendo os dados via App Group que o app grava a cada sync. Deep links dedicados por widget.
+- **Notificações ricas** via extensão nativa: o resumo diário/semanal (pontuais e recorrentes separados) e o lembrete expandido com a dica de adiar discreta.
+- **Pré-avisos ("me avise antes")** separados dos disparos reais no `/reminders/sync` (`pre_executions` com `at`/`target`/`lead_seconds`), cada um com notificação própria ("é daqui a X, às HH:MM").
+
+### Fixed
+- **Descrição de tarefa** não salvava ao ser esvaziada (o backend ignorava `notes: null`) nem refletia ao reabrir o modal na mesma sessão (buffer do `TextInput` multiline e closure congelado do `PanResponder`).
+
+### Changed
+- **Transição de tema** com cortina contínua — acaba o flash preto/branco e o engasgo do re-render. Alcança também os modais abertos.
+- `AnimatedExpand` mede a altura real do conteúdo em vez de estimar; combobox/seções abrem e fecham sem pipocar.
+- **Input do chat** sobe colado no teclado (padding único animado). Rolete de horário volta ao nativo, centralizado.
+- **Tab bar** em cápsula (cantos 100% redondos, mais recuo) com ripple de gradiente contínuo (sombra nativa) e listas correndo até o fim da tela.
+- `runtimeVersion` **fixo** (`'1.0.0'`), desamarrado da `version`, para bumpar a versão sem invalidar o OTA. Migração para `babel-preset-expo` (exigido pelo SDK 54).
+
+---
+
 ## [1.4.0] - 2026-06-22
 
 ### Added
