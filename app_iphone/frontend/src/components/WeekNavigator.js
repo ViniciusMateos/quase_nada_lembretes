@@ -9,18 +9,22 @@ import {
   View,
 } from 'react-native';
 import {
-  MESES_ABREV_CAP,
-  MESES_CAP,
-  MESES_CURTOS,
+  mesesAbrevCap,
+  mesesCap,
   getMonday,
   getWeekRangeLabel,
   getWeeksForMonth,
 } from '../utils/dateUtils';
+import { useI18n } from '../i18n';
 
 const GRID_GAP = 10;
 
 export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsoluteDate, theme }) {
+  const { t, lang, progresso } = useI18n();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  // Meses vêm do idioma ativo — recalculados quando `lang` muda.
+  const mesesAbrev = useMemo(() => mesesAbrevCap(), [lang, progresso]);
+  const mesesLongos = useMemo(() => mesesCap(), [lang, progresso]);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [pickerView, setPickerView] = useState('weeks'); // 'weeks' | 'months' | 'years'
   const [pickerYear, setPickerYear] = useState(currentDate.getFullYear());
@@ -117,7 +121,7 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
 
     if (pickerView === 'months') {
       return renderGrid(
-        MESES_ABREV_CAP.map((m, i) => ({
+        mesesAbrev.map((m, i) => ({
           key: m,
           label: m,
           active: i === pickerMonth,
@@ -135,7 +139,9 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
         {weeks.map((w, i) => {
           const selected = w.monday.getTime() === currentMonday;
           const isToday = w.monday.getTime() === todayMondayTime;
-          const range = `${w.monday.getDate()} ${MESES_CURTOS[w.monday.getMonth()]} - ${w.sunday.getDate()} ${MESES_CURTOS[w.sunday.getMonth()]}`;
+          // `w.monday` já é a segunda da semana, então o rótulo do util cai exato
+          // (e sai no formato certo de cada idioma).
+          const range = getWeekRangeLabel(w.monday);
           return (
             <Pressable
               key={i}
@@ -148,7 +154,8 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
               onPress={() => handleSelectWeek(w.monday)}
             >
               <Text style={[styles.weekRowTitle, selected && styles.weekRowTitleSelected]}>
-                Semana {i + 1}{isToday ? '  · hoje' : ''}
+                {t('reminders.week.n', { n: i + 1 })}
+                {isToday ? `  · ${t('reminders.week.todayTag')}` : ''}
               </Text>
               <Text style={styles.weekRowRange}>{range}</Text>
             </Pressable>
@@ -164,21 +171,21 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
         <Pressable
           style={({ pressed }) => [styles.arrowBtn, pressed && styles.pressedScale]}
           onPress={() => onChangeWeek(-7)}
-          accessibilityLabel="Semana anterior"
+          accessibilityLabel={t('reminders.week.previous')}
         >
           <Text style={styles.arrow}>‹</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.rangeWrap, pressed && styles.pressedScale]}
           onPress={openPicker}
-          accessibilityLabel="Escolher semana"
+          accessibilityLabel={t('reminders.week.choose')}
         >
           <Text style={styles.rangeText} numberOfLines={1}>{getWeekRangeLabel(currentDate)}</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.arrowBtn, pressed && styles.pressedScale]}
           onPress={() => onChangeWeek(7)}
-          accessibilityLabel="Próxima semana"
+          accessibilityLabel={t('reminders.week.next')}
         >
           <Text style={styles.arrow}>›</Text>
         </Pressable>
@@ -191,7 +198,7 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderLeft}>
                 {pickerView === 'years' ? (
-                  <Text style={styles.headerTitle}>Selecione o ano</Text>
+                  <Text style={styles.headerTitle}>{t('reminders.week.selectYear')}</Text>
                 ) : (
                   <Pressable onPress={() => setPickerView('years')} hitSlop={6}>
                     <Text style={styles.headerYear}>{pickerYear}</Text>
@@ -201,14 +208,14 @@ export default function WeekNavigator({ currentDate, onChangeWeek, onSetAbsolute
                   <>
                     <Text style={styles.headerDot}>•</Text>
                     <Pressable onPress={() => setPickerView('months')} hitSlop={6}>
-                      <Text style={styles.headerMonth}>{MESES_CAP[pickerMonth]}</Text>
+                      <Text style={styles.headerMonth}>{mesesLongos[pickerMonth]}</Text>
                     </Pressable>
                   </>
                 )}
                 {pickerView === 'months' && (
                   <>
                     <Text style={styles.headerDot}>•</Text>
-                    <Text style={styles.headerTitle}>Selecione o mês</Text>
+                    <Text style={styles.headerTitle}>{t('reminders.week.selectMonth')}</Text>
                   </>
                 )}
               </View>

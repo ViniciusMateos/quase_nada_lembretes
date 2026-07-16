@@ -2,15 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import Clipboard from 'react-native/Libraries/Components/Clipboard/Clipboard';
 import { useTheme } from '../context/ThemeContext';
+import { useI18n, getLocale } from '../i18n';
 import ActionSheet from './ActionSheet';
 import { detectIs12h } from '../utils/timeFormat';
 
+// 12h/24h continua vindo do aparelho; só o locale (as palavras) acompanha o idioma.
 const IS_12H = detectIs12h();
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return '';
   try {
-    return new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: IS_12H });
+    return new Date(timestamp).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit', hour12: IS_12H });
   } catch {
     return '';
   }
@@ -19,7 +21,7 @@ function formatTimestamp(timestamp) {
 function formatLocalDatetime(isoString) {
   if (!isoString) return '';
   try {
-    return new Date(isoString).toLocaleString('pt-BR', {
+    return new Date(isoString).toLocaleString(getLocale(), {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -39,6 +41,7 @@ function copyText(text) {
 }
 
 function AnimatedBubble({ children, message, styles, bubbleStyle }) {
+  const { t } = useI18n();
   const entrance = useRef(new Animated.Value(0)).current;
   const press = useRef(new Animated.Value(1)).current;
   const [isHolding, setIsHolding] = useState(false);
@@ -105,7 +108,7 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
     <ActionSheet
       visible={copySheetVisible}
       anchorPosition={anchorPos}
-      options={[{ label: 'Copiar texto', onPress: handleCopy }]}
+      options={[{ label: t('chat.copyText'), onPress: handleCopy }]}
       onCancel={() => setCopySheetVisible(false)}
     />
     </>
@@ -114,6 +117,7 @@ function AnimatedBubble({ children, message, styles, bubbleStyle }) {
 
 export default function MessageBubble({ message }) {
   const { theme } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const isUser = message.role === 'user';
   const isReminderCreated = message.action?.type === 'reminder_created';
@@ -123,9 +127,10 @@ export default function MessageBubble({ message }) {
     const reminder = message.action?.reminder;
     const isRecurring = reminder?.recurrence && reminder.recurrence !== 'once';
     const title = reminder?.title?.toUpperCase() || '';
-    const timeLabel = isRecurring ? 'a partir de' : 'data';
+    const timeLabel = isRecurring ? t('chat.reminderFrom') : t('chat.reminderDate');
     const timeStr = formatLocalDatetime(reminder?.next_execution);
-    const displayText = `${isRecurring ? 'Lembrete recorrente criado!' : 'Lembrete criado!'}\n${title}\n${timeLabel}: ${timeStr}`;
+    const cabecalho = isRecurring ? t('chat.reminderCreatedRecurring') : t('chat.reminderCreated');
+    const displayText = `${cabecalho}\n${title}\n${timeLabel}: ${timeStr}`;
 
     return (
       <View style={[styles.wrapper, styles.wrapperAssistant]}>

@@ -5,29 +5,31 @@
  * que as chaves de semana ("AAAA-Www") batam byte a byte com o backend e a
  * comparação lexicográfica de strings continue ordenando corretamente.
  *
- * Meses em PT-BR ficam hardcoded (sem depender de ICU/Intl) para evitar
- * variações entre engines (Hermes) e garantir o mesmo rótulo em qualquer build.
+ * Os meses eram arrays fixos em PT-BR. Agora saem do Intl no idioma escolhido no
+ * app — viraram FUNÇÕES (e não mais constantes) de propósito: o idioma pode
+ * mudar em runtime, e um array congelado no import ficaria preso ao idioma que
+ * estava valendo quando o módulo carregou.
  */
+import { anim, getLang, getLocale } from '../i18n';
 
-export const MESES_CURTOS = [
-  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-  'jul', 'ago', 'set', 'out', 'nov', 'dez',
-];
+const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-export const MESES = [
-  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
-  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
-];
+const mesesFmt = (mes, opts) =>
+  new Intl.DateTimeFormat(getLocale(), opts).format(new Date(2020, mes, 1));
 
-export const MESES_CAP = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-];
+/** ['jan','fev',...] no idioma ativo. */
+export const mesesCurtos = () =>
+  Array.from({ length: 12 }, (_, i) => mesesFmt(i, { month: 'short' }).replace('.', ''));
 
-export const MESES_ABREV_CAP = [
-  'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
-];
+/** ['janeiro','fevereiro',...] no idioma ativo. */
+export const meses = () =>
+  Array.from({ length: 12 }, (_, i) => mesesFmt(i, { month: 'long' }));
+
+/** ['Janeiro',...] no idioma ativo. */
+export const mesesCap = () => meses().map(cap);
+
+/** ['Jan','Fev',...] no idioma ativo. */
+export const mesesAbrevCap = () => mesesCurtos().map(cap);
 
 /** Chave ISO da semana ("AAAA-Www"). Réplica exata da função do site. */
 export function getWeekKey(date) {
@@ -49,18 +51,28 @@ export function getMonday(date) {
   return m;
 }
 
-/** Rótulo do intervalo da semana, ex: "22 jun - 28 jun". */
+/** Rótulo do intervalo da semana. PT: "22 jun - 28 jun" · EN: "Jun 22 - Jun 28". */
 export function getWeekRangeLabel(date) {
   const mon = getMonday(date);
   const sun = new Date(mon);
   sun.setDate(mon.getDate() + 6);
-  const fmt = d => `${d.getDate()} ${MESES_CURTOS[d.getMonth()]}`;
+  const m = mesesCurtos();
+  const emIngles = getLang() === 'en';
+  const fmt = d => (emIngles
+    ? `${cap(m[d.getMonth()])} ${d.getDate()}`   // Jun 22
+    : `${d.getDate()} ${m[d.getMonth()]}`);      // 22 jun
   return `${fmt(mon)} - ${fmt(sun)}`;
 }
 
-/** Data do dia no formato "23, dezembro, 2026". */
+/** Data do dia. PT: "23, dezembro, 2026" · EN: "December 23, 2026". */
 export function formatTodayLabel(date = new Date()) {
-  return `${date.getDate()}, ${MESES[date.getMonth()]}, ${date.getFullYear()}`;
+  const nome = meses()[date.getMonth()];
+  const texto = getLang() === 'en'
+    ? `${cap(nome)} ${date.getDate()}, ${date.getFullYear()}`
+    : `${date.getDate()}, ${nome}, ${date.getFullYear()}`;
+  // Passa pelo anim() porque o texto é montado aqui, não vem do dicionário:
+  // sem isso o cabeçalho ficaria parado enquanto a tela toda embaralha.
+  return anim(texto);
 }
 
 /**

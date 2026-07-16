@@ -25,6 +25,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
+import { t, useI18n } from '../i18n';
 
 const DEFAULT_AVATAR_COLOR = '#0A84FF';
 
@@ -36,9 +37,9 @@ const removeEmoji = str =>
 
 function getApiErrorMessage(error) {
   const status = error?.response?.status;
-  if (status === 401) return 'Senha incorreta';
-  if (!error?.response) return 'Sem conexão com o servidor';
-  return 'Erro ao entrar. Tente novamente';
+  if (status === 401) return t('auth.err.wrongPassword');
+  if (!error?.response) return t('auth.err.noConnectionShort');
+  return t('auth.err.loginFailed');
 }
 
 function AccountCard({ account, onPress, onRemove, theme, styles }) {
@@ -67,6 +68,7 @@ function AccountCard({ account, onPress, onRemove, theme, styles }) {
 }
 
 export default function AccountHubScreen({ navigation }) {
+  const { t } = useI18n();
   const { savedAccounts, removeSavedAccount, login: authLogin } = useAuth();
   const { theme, isDark, toggleTheme } = useTheme();
   const { width } = useWindowDimensions();
@@ -82,6 +84,11 @@ export default function AccountHubScreen({ navigation }) {
   const [rawError, setRawError] = useState(null);
   const [removeConfirmEmail, setRemoveConfirmEmail] = useState(null);
 
+  // Este sheet não tem ScrollView (o conteúdo é uma View só), então não dá pra
+  // contar com o automaticallyAdjustKeyboardInsets: quem tira o campo de senha
+  // de baixo do teclado é a translação. Pra ela não descolar o sheet do rodapé
+  // e deixar aparecer o preto do overlay, o fundo do sheet se estende pra baixo
+  // da tela (ver styles.sheet).
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslateY = useRef(new Animated.Value(320)).current;
   const keyboardOffset = useRef(new Animated.Value(0)).current;
@@ -115,8 +122,11 @@ export default function AccountHubScreen({ navigation }) {
 
   useEffect(() => {
     if (!selectedAccount) return;
+    // Sobe o sheet o suficiente pro campo respirar acima do teclado.
     const show = Keyboard.addListener('keyboardWillShow', e => {
       Animated.timing(keyboardOffset, {
+        // Altura cheia do teclado; o respiro vem do paddingBottom (40) do
+        // sheetContent, que fica entre o último botão e o topo do teclado.
         toValue: -e.endCoordinates.height,
         duration: e.duration || 250,
         useNativeDriver: true,
@@ -155,7 +165,7 @@ export default function AccountHubScreen({ navigation }) {
   ).current;
 
   const handleQuickLogin = async () => {
-    if (!password) { setLoginError('Digite sua senha'); return; }
+    if (!password) { setLoginError(t('auth.err.passwordEmpty')); return; }
     setIsLoading(true);
     setLoginError(null);
     setRawError(null);
@@ -177,17 +187,18 @@ export default function AccountHubScreen({ navigation }) {
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
       >
         <Image
           source={require('../../assets/logo.png')}
           style={{ width: logoSize, height: logoSize, resizeMode: 'contain', alignSelf: 'center', marginBottom: 20, tintColor: isDark ? undefined : '#1A1A2E' }}
-          accessibilityLabel="Logo Quase Nada"
+          accessibilityLabel={t('auth.a11y.logo')}
         />
 
         {savedAccounts.length > 0 ? (
           <>
-            <Text style={styles.title}>Bem-vindo de volta</Text>
-            <Text style={styles.subtitle}>Escolha uma conta para continuar</Text>
+            <Text style={styles.title}>{t('auth.hub.welcomeBack')}</Text>
+            <Text style={styles.subtitle}>{t('auth.hub.chooseAccount')}</Text>
 
             <View style={styles.accountList}>
               {savedAccounts.map(account => (
@@ -204,8 +215,8 @@ export default function AccountHubScreen({ navigation }) {
           </>
         ) : (
           <>
-            <Text style={styles.title}>Olá!</Text>
-            <Text style={styles.subtitle}>Entre para começar a usar seus lembretes</Text>
+            <Text style={styles.title}>{t('auth.hub.hello')}</Text>
+            <Text style={styles.subtitle}>{t('auth.hub.helloSubtitle')}</Text>
           </>
         )}
 
@@ -214,14 +225,14 @@ export default function AccountHubScreen({ navigation }) {
           onPress={() => navigation.navigate('Login')}
         >
           <Text style={styles.otherAccountText}>
-            {savedAccounts.length > 0 ? '+ Entrar com outra conta' : 'Fazer login'}
+            {savedAccounts.length > 0 ? t('auth.hub.otherAccount') : t('auth.hub.doLogin')}
           </Text>
         </PressableScale>
 
         <View style={styles.registerRow}>
-          <Text style={styles.registerText}>Não tem conta? </Text>
+          <Text style={styles.registerText}>{t('auth.hub.noAccount')}</Text>
           <PressableScale onPress={() => navigation.navigate('Register')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.registerLink}>Criar conta</Text>
+            <Text style={styles.registerLink}>{t('auth.hub.createAccount')}</Text>
           </PressableScale>
         </View>
       </ScrollView>
@@ -254,7 +265,7 @@ export default function AccountHubScreen({ navigation }) {
                 <View style={[styles.inputWrapper, loginError && styles.inputError]}>
                   <TextInput
                     style={styles.inputInner}
-                    placeholder="Sua senha"
+                    placeholder={t('auth.field.passwordPlaceholder')}
                     placeholderTextColor={theme.textPlaceholder}
                     value={password}
                     onChangeText={text => {
@@ -285,7 +296,7 @@ export default function AccountHubScreen({ navigation }) {
                   {isLoading ? (
                     <LoadingDog size={28} color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.sheetBtnText}>Entrar</Text>
+                    <Text style={styles.sheetBtnText}>{t('auth.hub.signIn')}</Text>
                   )}
                 </PressableScale>
               </View>
@@ -295,9 +306,9 @@ export default function AccountHubScreen({ navigation }) {
 
       <ConfirmDialog
         visible={!!removeConfirmEmail}
-        title="Remover conta"
-        message={`Remover "${removeConfirmEmail}" da lista de contas? Você pode entrar novamente depois.`}
-        confirmText="Remover"
+        title={t('auth.hub.removeTitle')}
+        message={t('auth.hub.removeMessage', { email: removeConfirmEmail })}
+        confirmText={t('auth.hub.removeConfirm')}
         destructive
         onCancel={() => setRemoveConfirmEmail(null)}
         onConfirm={() => {
@@ -314,7 +325,7 @@ export default function AccountHubScreen({ navigation }) {
         onPress={toggleTheme}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={isDark ? 'Ativar tema claro' : 'Ativar tema escuro'}
+        accessibilityLabel={isDark ? t('auth.a11y.lightTheme') : t('auth.a11y.darkTheme')}
       >
         <Image
           source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
@@ -446,6 +457,11 @@ function makeStyles(theme, insets = { top: 0 }) {
       backgroundColor: theme.surface,
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
+      // Estende o fundo do sheet 500px abaixo da tela sem deslocar o conteúdo.
+      // Quando o teclado sobe o sheet, é essa "sobra" que fica sob o teclado —
+      // em vez do preto do overlay.
+      paddingBottom: 500,
+      marginBottom: -500,
     },
     sheetHandle: { paddingTop: 12, paddingBottom: 4, alignItems: 'center', paddingHorizontal: 60 },
     handle: { width: 40, height: 4, backgroundColor: theme.border, borderRadius: 2 },

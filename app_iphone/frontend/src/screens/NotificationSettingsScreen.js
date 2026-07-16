@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotificationSettings } from '../context/NotificationSettingsContext';
+import { useI18n } from '../i18n';
 import ChevronIcon from '../components/ChevronIcon';
 import PressableScale from '../components/PressableScale';
 
 export default function NotificationSettingsScreen({ navigation }) {
   const { theme } = useTheme();
+  const { t } = useI18n();
   const { priority, togglePriority } = useNotificationSettings();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -24,7 +26,7 @@ export default function NotificationSettingsScreen({ navigation }) {
         <PressableScale onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 18, right: 18 }}>
           <ChevronIcon color={theme.primary} size={38} style={styles.backButton} />
         </PressableScale>
-        <Text style={styles.headerTitle}>Notificações</Text>
+        <Text style={styles.headerTitle}>{t('notifications.settings.title')}</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -32,9 +34,9 @@ export default function NotificationSettingsScreen({ navigation }) {
         <View style={styles.section}>
           <View style={styles.row}>
             <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Notificação prioritária</Text>
+              <Text style={styles.rowTitle}>{t('notifications.settings.priority.title')}</Text>
               <Text style={styles.rowDesc}>
-                Tenta furar os modos de Foco do iPhone para você não perder lembretes.
+                {t('notifications.settings.priority.desc')}
               </Text>
             </View>
             <Switch
@@ -47,7 +49,7 @@ export default function NotificationSettingsScreen({ navigation }) {
         </View>
 
         <PressableScale style={styles.linkRow} onPress={() => Linking.openSettings()}>
-          <Text style={styles.linkText}>Abrir ajustes do sistema</Text>
+          <Text style={styles.linkText}>{t('notifications.settings.openSystemSettings')}</Text>
           <ChevronIcon direction="right" color={theme.textSecondary} size={24} />
         </PressableScale>
       </ScrollView>

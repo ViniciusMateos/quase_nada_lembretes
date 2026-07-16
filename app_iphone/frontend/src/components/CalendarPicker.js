@@ -1,12 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import PressableScale from './PressableScale';
+import { useI18n } from '../i18n';
+import { mesesCap } from '../utils/dateUtils';
 
-const WEEK_DAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-const MONTHS_PT = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-];
+// Iniciais dos dias (domingo → sábado) e nomes dos meses saem do idioma ativo:
+// nada de array congelado no import.
 
 function buildCalendarGrid(year, month) {
   const firstDay = new Date(year, month, 1).getDay();
@@ -38,12 +37,15 @@ function isToday(cell) {
 }
 
 export default function CalendarPicker({ selectedDate, onSelect, theme }) {
+  const { t, lang, progresso } = useI18n();
   const today = new Date();
   const [viewYear, setViewYear] = useState(selectedDate ? selectedDate.getFullYear() : today.getFullYear());
   const [viewMonth, setViewMonth] = useState(selectedDate ? selectedDate.getMonth() : today.getMonth());
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const cells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+  const weekDays = useMemo(() => t('reminders.cal.weekDayInitials').split(','), [t, lang, progresso]);
+  const monthNames = useMemo(() => mesesCap(), [lang, progresso]);
 
   // Slide direcional ao trocar de mês: avançar = conteúdo sai pra esquerda e o
   // novo entra da direita; voltar = o oposto. (Animated core, padrão do app.)
@@ -82,14 +84,14 @@ export default function CalendarPicker({ selectedDate, onSelect, theme }) {
         <PressableScale onPress={prevMonth} hitSlop={10} style={styles.navBtn}>
           <Text style={styles.navText}>{'‹'}</Text>
         </PressableScale>
-        <Text style={styles.monthTitle}>{MONTHS_PT[viewMonth]} {viewYear}</Text>
+        <Text style={styles.monthTitle}>{monthNames[viewMonth]} {viewYear}</Text>
         <PressableScale onPress={nextMonth} hitSlop={10} style={styles.navBtn}>
           <Text style={styles.navText}>{'›'}</Text>
         </PressableScale>
       </View>
 
       <View style={styles.weekRow}>
-        {WEEK_DAYS.map((d, i) => (
+        {weekDays.map((d, i) => (
           <Text key={i} style={styles.weekDay}>{d}</Text>
         ))}
       </View>

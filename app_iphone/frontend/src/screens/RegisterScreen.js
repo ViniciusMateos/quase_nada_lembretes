@@ -20,6 +20,8 @@ import ChevronIcon from '../components/ChevronIcon';
 import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
+import useKeyboardNudge from '../utils/useKeyboardNudge';
+import { t, useI18n } from '../i18n';
 
 const removeEmoji = str =>
   str.replace(
@@ -28,34 +30,35 @@ const removeEmoji = str =>
   );
 
 function validateName(value) {
-  if (!value.trim()) return 'Nome é obrigatório';
-  if (value.trim().length < 2) return 'Nome deve ter pelo menos 2 caracteres';
+  if (!value.trim()) return t('auth.err.nameRequired');
+  if (value.trim().length < 2) return t('auth.err.nameTooShort');
   return null;
 }
 
 function validateEmail(value) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!value.trim()) return 'E-mail é obrigatório';
-  if (!emailRegex.test(value.trim())) return 'Digite um e-mail válido';
+  if (!value.trim()) return t('auth.err.emailRequired');
+  if (!emailRegex.test(value.trim())) return t('auth.err.emailInvalid');
   return null;
 }
 
 function validatePassword(value) {
-  if (!value) return 'Senha é obrigatória';
-  if (value.length < 8) return 'A senha deve ter pelo menos 8 caracteres';
+  if (!value) return t('auth.err.passwordRequired');
+  if (value.length < 8) return t('auth.err.passwordTooShort');
   return null;
 }
 
 function getApiErrorMessage(error) {
   const status = error?.response?.status;
   const code = error?.response?.data?.code || error?.response?.data?.detail;
-  if (status === 409 || code === 'EMAIL_ALREADY_EXISTS') return 'Este e-mail já está cadastrado';
-  if (status === 422) return 'Verifique os dados informados e tente novamente';
-  if (!error?.response) return 'Sem conexão com o servidor. Verifique sua internet';
-  return 'Erro ao criar conta. Tente novamente';
+  if (status === 409 || code === 'EMAIL_ALREADY_EXISTS') return t('auth.err.emailAlreadyExists');
+  if (status === 422) return t('auth.err.invalidData');
+  if (!error?.response) return t('auth.err.noConnection');
+  return t('auth.err.registerFailed');
 }
 
 export default function RegisterScreen({ navigation }) {
+  const { t } = useI18n();
   const { login: authLogin } = useAuth();
   const { theme, isDark, toggleTheme } = useTheme();
   const { width } = useWindowDimensions();
@@ -72,6 +75,7 @@ export default function RegisterScreen({ navigation }) {
 
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(theme, insets), [theme, insets]);
+  const { scrollRef, scrollProps, nudge } = useKeyboardNudge();
 
   const validateAll = () => {
     const newErrors = {
@@ -108,29 +112,30 @@ export default function RegisterScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView ref={scrollRef} {...scrollProps} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
           <Image
             source={require('../../assets/logo.png')}
             style={{ width: logoSize, height: logoSize, resizeMode: 'contain', alignSelf: 'center', marginBottom: 24, tintColor: isDark ? undefined : '#1A1A2E' }}
-            accessibilityLabel="Logo Quase Nada"
+            accessibilityLabel={t('auth.a11y.logo')}
           />
 
           <View style={styles.header}>
-            <Text style={styles.title}>Criar conta</Text>
-            <Text style={styles.subtitle}>Bem-vindo ao Quase Nada Lembretes</Text>
+            <Text style={styles.title}>{t('auth.register.title')}</Text>
+            <Text style={styles.subtitle}>{t('auth.register.subtitle')}</Text>
           </View>
 
           <ErrorBanner message={apiError} error={rawError} />
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Nome</Text>
+            <Text style={styles.label}>{t('auth.field.name')}</Text>
             <TextInput
               style={[styles.input, errors.name && styles.inputError]}
-              placeholder="Seu nome"
+              placeholder={t('auth.field.namePlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
               value={name}
               onChangeText={text => { setName(text); if (errors.name) setErrors(prev => ({ ...prev, name: validateName(text) })); }}
               onBlur={() => handleFieldBlur('name')}
+              onFocus={nudge}
               autoCapitalize="words"
               autoCorrect={false}
               returnKeyType="next"
@@ -140,14 +145,15 @@ export default function RegisterScreen({ navigation }) {
           </View>
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>E-mail</Text>
+            <Text style={styles.label}>{t('auth.field.email')}</Text>
             <TextInput
               style={[styles.input, errors.email && styles.inputError]}
-              placeholder="seu@email.com"
+              placeholder={t('auth.field.emailPlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
               value={email}
               onChangeText={text => { setEmail(text); if (errors.email) setErrors(prev => ({ ...prev, email: validateEmail(text) })); }}
               onBlur={() => handleFieldBlur('email')}
+              onFocus={nudge}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -158,15 +164,16 @@ export default function RegisterScreen({ navigation }) {
           </View>
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Senha</Text>
+            <Text style={styles.label}>{t('auth.field.password')}</Text>
             <View style={[styles.inputWrapper, errors.password && styles.inputError]}>
               <TextInput
                 style={styles.inputInner}
-                placeholder="Mínimo 8 caracteres"
+                placeholder={t('auth.field.min8')}
                 placeholderTextColor={theme.textPlaceholder}
                 value={password}
                 onChangeText={text => { const clean = removeEmoji(text); setPassword(clean); if (errors.password) setErrors(prev => ({ ...prev, password: validatePassword(clean) })); }}
                 onBlur={() => handleFieldBlur('password')}
+                onFocus={nudge}
                 secureTextEntry={!showPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleSubmit}
@@ -176,7 +183,7 @@ export default function RegisterScreen({ navigation }) {
                 onPress={() => setShowPassword(p => !p)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.eyeButton}
-                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                accessibilityLabel={showPassword ? t('auth.a11y.hidePassword') : t('auth.a11y.showPassword')}
               >
                 <PasswordVisibilityIcon hidden={showPassword} color={theme.textPlaceholder} />
               </PressableScale>
@@ -189,20 +196,20 @@ export default function RegisterScreen({ navigation }) {
             onPress={handleSubmit}
             disabled={isLoading}
             accessibilityRole="button"
-            accessibilityLabel="Criar conta"
+            accessibilityLabel={t('auth.register.submit')}
             accessibilityState={{ disabled: isLoading }}
           >
             {isLoading ? (
               <LoadingDog size={28} color="#FFFFFF" />
             ) : (
-              <Text style={styles.buttonText}>Criar conta</Text>
+              <Text style={styles.buttonText}>{t('auth.register.submit')}</Text>
             )}
           </PressableScale>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Já tenho conta </Text>
+            <Text style={styles.footerText}>{t('auth.register.hasAccount')}</Text>
             <PressableScale onPress={() => navigation.navigate('Login')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.footerLink}>Entrar</Text>
+              <Text style={styles.footerLink}>{t('auth.register.signIn')}</Text>
             </PressableScale>
           </View>
         </ScrollView>
@@ -216,7 +223,7 @@ export default function RegisterScreen({ navigation }) {
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          accessibilityLabel="Voltar"
+          accessibilityLabel={t('common.back')}
         >
           <ChevronIcon color={theme.textSecondary} size={32} />
         </PressableScale>
@@ -228,7 +235,7 @@ export default function RegisterScreen({ navigation }) {
         onPress={toggleTheme}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={isDark ? 'Ativar tema claro' : 'Ativar tema escuro'}
+        accessibilityLabel={isDark ? t('auth.a11y.lightTheme') : t('auth.a11y.darkTheme')}
       >
         <Image
           source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}

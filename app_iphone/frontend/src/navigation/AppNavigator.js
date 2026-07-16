@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../i18n';
 import AccountHubScreen from '../screens/AccountHubScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -48,6 +49,9 @@ function AuthStack() {
 
 function AppTabs() {
   const { theme } = useTheme();
+  // Os NOMES das rotas continuam em português (navigation.navigate depende deles);
+  // só o rótulo exibido é traduzido.
+  const { t } = useI18n();
 
   return (
     <Tab.Navigator
@@ -64,7 +68,7 @@ function AppTabs() {
         name="Tarefas"
         component={TasksScreen}
         options={{
-          tabBarLabel: 'Tarefas',
+          tabBarLabel: t('chat.tab.tasks'),
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/task.png')}
@@ -77,7 +81,7 @@ function AppTabs() {
         name="Chat"
         component={ChatScreen}
         options={{
-          tabBarLabel: 'Chat',
+          tabBarLabel: t('chat.tab.chat'),
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/icon-chat.png')}
@@ -90,7 +94,7 @@ function AppTabs() {
         name="Lembretes"
         component={RemindersScreen}
         options={{
-          tabBarLabel: 'Lembretes',
+          tabBarLabel: t('chat.tab.reminders'),
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/icon-lembretes.png')}

@@ -8,7 +8,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useTheme } from '../context/ThemeContext';
+import { ThemeCover, useTheme } from '../context/ThemeContext';
+import { useI18n } from '../i18n';
 import ChevronIcon from './ChevronIcon';
 import PressableScale from './PressableScale';
 
@@ -26,7 +27,8 @@ export function HamburgerIcon() {
 }
 
 export default function HamburgerMenu({ visible, onClose, navigation }) {
-  const { theme, isDark, toggleTheme, fadeAnim } = useTheme();
+  const { theme, isDark, toggleTheme } = useTheme();
+  const { t, lang, setLang } = useI18n();
   const slideAnim = useRef(new Animated.Value(340)).current;
 
   useEffect(() => {
@@ -58,19 +60,19 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} />
-        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }], opacity: fadeAnim }]}>
+        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
           {BlurView && <BlurView intensity={60} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, { backgroundColor: drawerBg }]} />
 
           <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.textSecondary }]}>Configurações</Text>
+            <Text style={[styles.title, { color: theme.textSecondary }]}>{t('chat.menu.title')}</Text>
             <PressableScale onPress={close} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={{ color: theme.textSecondary, fontSize: 20, fontWeight: '600' }}>✕</Text>
             </PressableScale>
           </View>
 
           <PressableScale style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]} onPress={toggleTheme}>
-            <Text style={[styles.cardText, { color: theme.textPrimary }]}>Alterar tema</Text>
+            <Text style={[styles.cardText, { color: theme.textPrimary }]}>{t('chat.menu.theme')}</Text>
             <View style={[styles.themeToggleTrack, { backgroundColor: isDark ? theme.surface2 : theme.border }]}>
               <Image
                 source={require('../../assets/icon-tema-claro.png')}
@@ -85,15 +87,34 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
           </PressableScale>
 
           <PressableScale style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]} onPress={goToNotifications}>
-            <Text style={[styles.cardText, { color: theme.textPrimary }]}>Notificações</Text>
+            <Text style={[styles.cardText, { color: theme.textPrimary }]}>{t('chat.menu.notifications')}</Text>
             <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
           </PressableScale>
 
+          {/* Idioma: mesmo formato do toggle de tema — trilho com a pílula
+              deslizando entre as duas opções. */}
+          <PressableScale
+            style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}
+            onPress={() => setLang(lang === 'pt' ? 'en' : 'pt')}
+          >
+            <Text style={[styles.cardText, { color: theme.textPrimary }]}>{t('common.language')}</Text>
+            <View style={[styles.langTrack, { backgroundColor: isDark ? theme.surface2 : theme.border }]}>
+              <View style={[styles.langThumb, { left: lang === 'pt' ? 3 : 39, backgroundColor: theme.primary }]} />
+              <Text style={[styles.langText, { color: lang === 'pt' ? '#FFFFFF' : theme.textSecondary }]}>PT</Text>
+              <Text style={[styles.langText, { color: lang === 'en' ? '#FFFFFF' : theme.textSecondary }]}>EN</Text>
+            </View>
+          </PressableScale>
+
           <PressableScale style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]} onPress={goToAccount}>
-            <Text style={[styles.cardText, { color: theme.textPrimary }]}>Conta</Text>
+            <Text style={[styles.cardText, { color: theme.textPrimary }]}>{t('common.account')}</Text>
             <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
           </PressableScale>
         </Animated.View>
+
+        {/* Modal é uma janela nativa separada: a cortina do ThemeProvider não
+            alcança aqui dentro. Sem esta, o menu trocaria de tema fora da
+            animação, depois do resto — que era o "pisca" que sobrava. */}
+        <ThemeCover />
       </View>
     </Modal>
   );
@@ -150,4 +171,19 @@ const styles = StyleSheet.create({
   },
   themeToggleIcon: { width: 15, height: 15, zIndex: 1 },
   themeToggleThumb: { position: 'absolute', top: 3, width: 26, height: 24, borderRadius: 12 },
+
+  // Trilho do idioma: um pouco mais largo que o de tema porque carrega texto
+  // ("PT"/"EN") em vez de ícone.
+  langTrack: {
+    width: 70,
+    height: 30,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    position: 'relative',
+  },
+  langThumb: { position: 'absolute', top: 3, width: 28, height: 24, borderRadius: 12 },
+  langText: { fontSize: 11, fontWeight: '700', zIndex: 1, fontFamily: 'System' },
 });

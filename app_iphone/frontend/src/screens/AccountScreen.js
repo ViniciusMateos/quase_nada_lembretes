@@ -25,6 +25,7 @@ import ChevronIcon from '../components/ChevronIcon';
 import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
+import { useI18n } from '../i18n';
 
 const AVATAR_COLORS = [
   '#FF8234', '#6366F1', '#8B5CF6',
@@ -79,6 +80,7 @@ function AnimatedExpand({ visible, children, expandedHeight = 300 }) {
 }
 
 export default function AccountScreen({ navigation }) {
+  const { t } = useI18n();
   const { user, logout, savedAccounts, removeSavedAccount, updateSavedAccount } = useAuth();
   const { theme } = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -132,6 +134,8 @@ export default function AccountScreen({ navigation }) {
     if (!deleteSheetVisible) return;
     const show = Keyboard.addListener('keyboardWillShow', e => {
       Animated.timing(deleteKeyboardOffset, {
+        // Sobe a altura cheia do teclado: o sheet encosta o rodapé no topo dele
+        // e o respiro visual vem do paddingBottom interno (44).
         toValue: -e.endCoordinates.height,
         duration: e.duration || 250,
         useNativeDriver: true,
@@ -194,7 +198,7 @@ export default function AccountScreen({ navigation }) {
   };
 
   const handleDeleteAccount = async () => {
-    if (!deletePassword) { setDeleteError('Digite sua senha'); return; }
+    if (!deletePassword) { setDeleteError(t('auth.err.passwordEmpty')); return; }
     setIsDeleting(true);
     setDeleteError(null);
     try {
@@ -204,9 +208,9 @@ export default function AccountScreen({ navigation }) {
       logout();
     } catch (error) {
       const status = error?.response?.status;
-      if (status === 401) setDeleteError('Senha incorreta');
-      else if (!error?.response) setDeleteError('Sem conexão com o servidor');
-      else setDeleteError('Erro ao excluir conta. Tente novamente');
+      if (status === 401) setDeleteError(t('auth.err.wrongPassword'));
+      else if (!error?.response) setDeleteError(t('auth.err.noConnectionShort'));
+      else setDeleteError(t('auth.err.deleteFailed'));
       setDeletePassword('');
     } finally {
       setIsDeleting(false);
@@ -220,13 +224,14 @@ export default function AccountScreen({ navigation }) {
           <PressableScale onPress={handleGoBack} hitSlop={{ top: 10, bottom: 10, left: 18, right: 18 }}>
             <ChevronIcon color={theme.primary} size={38} style={styles.backButton} />
           </PressableScale>
-          <Text style={styles.headerTitle}>Conta</Text>
+          <Text style={styles.headerTitle}>{t('common.account')}</Text>
           <View style={{ width: 44 }} />
         </View>
 
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets
           onScrollBeginDrag={() => setColorPickerVisible(false)}
         >
           <Pressable onPress={() => colorPickerVisible && setColorPickerVisible(false)}>
@@ -275,25 +280,25 @@ export default function AccountScreen({ navigation }) {
                 </View>
               </AnimatedExpand>
 
-              <Text style={styles.userName}>{user?.name || 'Usuário'}</Text>
+              <Text style={styles.userName}>{user?.name || t('auth.account.defaultName')}</Text>
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
             </View>
 
             <View style={styles.section}>
               <PressableScale style={styles.menuItem} onPress={() => navigation.navigate('ChangePassword')}>
-                <Text style={styles.menuItemText}>Alterar senha</Text>
+                <Text style={styles.menuItemText}>{t('auth.account.changePassword')}</Text>
                 <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
               </PressableScale>
               <View style={styles.divider} />
               <PressableScale style={styles.menuItem} onPress={openDeleteSheet}>
-                <Text style={[styles.menuItemText, { color: theme.error }]}>Excluir conta</Text>
+                <Text style={[styles.menuItemText, { color: theme.error }]}>{t('auth.account.deleteAccount')}</Text>
                 <ChevronIcon direction="right" color={theme.error} size={26} />
               </PressableScale>
             </View>
 
             <View style={styles.logoutSection}>
               <PressableScale style={styles.logoutButton} onPress={() => setConfirmLogoutVisible(true)}>
-                <Text style={styles.logoutButtonText}>Sair</Text>
+                <Text style={styles.logoutButtonText}>{t('auth.account.logout')}</Text>
               </PressableScale>
             </View>
           </Pressable>
@@ -301,9 +306,9 @@ export default function AccountScreen({ navigation }) {
 
         <ConfirmDialog
           visible={confirmLogoutVisible}
-          title="Sair da conta"
-          message="Tem certeza que deseja sair?"
-          confirmText="Sair"
+          title={t('auth.account.logoutTitle')}
+          message={t('auth.account.logoutMessage')}
+          confirmText={t('auth.account.logout')}
           destructive
           onCancel={() => setConfirmLogoutVisible(false)}
           onConfirm={() => { setConfirmLogoutVisible(false); logout(); }}
@@ -329,9 +334,9 @@ export default function AccountScreen({ navigation }) {
               <View style={[styles.handle, { backgroundColor: theme.border }]} />
             </View>
             <View>
-              <Text style={[styles.deleteTitle, { color: theme.textPrimary }]}>Excluir conta</Text>
+              <Text style={[styles.deleteTitle, { color: theme.textPrimary }]}>{t('auth.account.deleteAccount')}</Text>
               <Text style={[styles.deleteWarning, { color: theme.textSecondary }]}>
-                Esta ação é irreversível. Todos os seus lembretes e dados serão permanentemente apagados.
+                {t('auth.account.deleteWarning')}
               </Text>
 
               {deleteError ? (
@@ -341,10 +346,10 @@ export default function AccountScreen({ navigation }) {
               <View style={[styles.inputWrapper, { backgroundColor: theme.surface2, borderColor: deleteError ? theme.error : theme.border }]}>
                 <TextInput
                   style={[styles.inputInner, { color: theme.textPrimary }]}
-                  placeholder="Confirme sua senha"
+                  placeholder={t('auth.account.deletePasswordPlaceholder')}
                   placeholderTextColor={theme.textPlaceholder}
                   value={deletePassword}
-                  onChangeText={t => { setDeletePassword(t); if (deleteError) setDeleteError(null); }}
+                  onChangeText={text => { setDeletePassword(text); if (deleteError) setDeleteError(null); }}
                   secureTextEntry={!showDeletePassword}
                   editable={!isDeleting}
                   autoFocus
@@ -367,7 +372,7 @@ export default function AccountScreen({ navigation }) {
                     onPress={closeDeleteSheet}
                     disabled={isDeleting}
                   >
-                    <Text style={[styles.cancelBtnText, { color: theme.textPrimary }]}>Cancelar</Text>
+                    <Text style={[styles.cancelBtnText, { color: theme.textPrimary }]}>{t('common.cancel')}</Text>
                   </PressableScale>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -378,7 +383,7 @@ export default function AccountScreen({ navigation }) {
                   >
                     {isDeleting
                       ? <LoadingDog size={28} color="#FFFFFF" />
-                      : <Text style={styles.confirmDeleteBtnText}>Excluir</Text>
+                      : <Text style={styles.confirmDeleteBtnText}>{t('common.delete')}</Text>
                     }
                   </PressableScale>
                 </View>
@@ -537,7 +542,11 @@ function makeStyles(theme) {
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
       paddingHorizontal: 24,
-      paddingBottom: 44,
+      // 44 de respiro do conteúdo + 500 de sobra que fica sob o teclado quando
+      // o sheet sobe (o marginBottom negativo joga essa sobra pra fora da tela,
+      // então ela não desloca nada — só evita o preto do overlay aparecendo).
+      paddingBottom: 544,
+      marginBottom: -500,
     },
     sheetHandle: {
       paddingTop: 12,

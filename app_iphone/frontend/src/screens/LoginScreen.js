@@ -20,6 +20,8 @@ import ChevronIcon from '../components/ChevronIcon';
 import LoadingDog from '../components/LoadingDog';
 import PasswordVisibilityIcon from '../components/PasswordVisibilityIcon';
 import PressableScale from '../components/PressableScale';
+import useKeyboardNudge from '../utils/useKeyboardNudge';
+import { t, useI18n } from '../i18n';
 
 const removeEmoji = str =>
   str.replace(
@@ -29,13 +31,14 @@ const removeEmoji = str =>
 
 function getApiErrorMessage(error) {
   const status = error?.response?.status;
-  if (status === 401) return 'E-mail ou senha incorretos';
-  if (status === 422) return 'Verifique os dados informados e tente novamente';
-  if (!error?.response) return 'Sem conexão com o servidor. Verifique sua internet';
-  return 'Erro ao entrar. Tente novamente';
+  if (status === 401) return t('auth.err.invalidCredentials');
+  if (status === 422) return t('auth.err.invalidData');
+  if (!error?.response) return t('auth.err.noConnection');
+  return t('auth.err.loginFailed');
 }
 
 export default function LoginScreen({ navigation }) {
+  const { t } = useI18n();
   const { login: authLogin } = useAuth();
   const { theme, isDark, toggleTheme } = useTheme();
   const { width } = useWindowDimensions();
@@ -52,11 +55,12 @@ export default function LoginScreen({ navigation }) {
 
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(theme, insets), [theme, insets]);
+  const { scrollRef, scrollProps, nudge } = useKeyboardNudge();
 
   const validateForm = () => {
     let valid = true;
-    if (!email.trim()) { setEmailError('E-mail é obrigatório'); valid = false; } else setEmailError(null);
-    if (!password) { setPasswordError('Senha é obrigatória'); valid = false; } else setPasswordError(null);
+    if (!email.trim()) { setEmailError(t('auth.err.emailRequired')); valid = false; } else setEmailError(null);
+    if (!password) { setPasswordError(t('auth.err.passwordRequired')); valid = false; } else setPasswordError(null);
     return valid;
   };
 
@@ -88,28 +92,29 @@ export default function LoginScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView ref={scrollRef} {...scrollProps} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
           <Image
             source={require('../../assets/logo.png')}
             style={{ width: logoSize, height: logoSize, resizeMode: 'contain', alignSelf: 'center', marginBottom: 24, tintColor: isDark ? undefined : '#1A1A2E' }}
-            accessibilityLabel="Logo Quase Nada"
+            accessibilityLabel={t('auth.a11y.logo')}
           />
 
           <View style={styles.header}>
-            <Text style={styles.title}>Entrar</Text>
-            <Text style={styles.subtitle}>Acesse sua conta</Text>
+            <Text style={styles.title}>{t('auth.login.title')}</Text>
+            <Text style={styles.subtitle}>{t('auth.login.subtitle')}</Text>
           </View>
 
           <ErrorBanner message={apiError} error={rawError} />
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>E-mail</Text>
+            <Text style={styles.label}>{t('auth.field.email')}</Text>
             <TextInput
               style={[styles.input, emailError && styles.inputError]}
-              placeholder="seu@email.com"
+              placeholder={t('auth.field.emailPlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
               value={email}
               onChangeText={text => { setEmail(text); if (emailError && text.trim()) setEmailError(null); }}
+              onFocus={nudge}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -120,14 +125,15 @@ export default function LoginScreen({ navigation }) {
           </View>
 
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Senha</Text>
+            <Text style={styles.label}>{t('auth.field.password')}</Text>
             <View style={[styles.inputWrapper, passwordError && styles.inputError]}>
               <TextInput
                 style={styles.inputInner}
-                placeholder="Sua senha"
+                placeholder={t('auth.field.passwordPlaceholder')}
                 placeholderTextColor={theme.textPlaceholder}
                 value={password}
                 onChangeText={text => { const clean = removeEmoji(text); setPassword(clean); if (passwordError && clean) setPasswordError(null); }}
+                onFocus={nudge}
                 secureTextEntry={!showPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleSubmit}
@@ -137,7 +143,7 @@ export default function LoginScreen({ navigation }) {
                 onPress={() => setShowPassword(p => !p)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.eyeButton}
-                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                accessibilityLabel={showPassword ? t('auth.a11y.hidePassword') : t('auth.a11y.showPassword')}
               >
                 <PasswordVisibilityIcon hidden={showPassword} color={theme.textPlaceholder} />
               </PressableScale>
@@ -150,20 +156,20 @@ export default function LoginScreen({ navigation }) {
             onPress={handleSubmit}
             disabled={isLoading}
             accessibilityRole="button"
-            accessibilityLabel="Entrar"
+            accessibilityLabel={t('auth.login.submit')}
             accessibilityState={{ disabled: isLoading }}
           >
             {isLoading ? (
               <LoadingDog size={28} color="#FFFFFF" />
             ) : (
-              <Text style={styles.buttonText}>Entrar</Text>
+              <Text style={styles.buttonText}>{t('auth.login.submit')}</Text>
             )}
           </PressableScale>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Não tenho conta </Text>
+            <Text style={styles.footerText}>{t('auth.login.noAccount')}</Text>
             <PressableScale onPress={() => navigation.navigate('Register')} disabled={isLoading} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.footerLink}>Criar conta</Text>
+              <Text style={styles.footerLink}>{t('auth.login.createAccount')}</Text>
             </PressableScale>
           </View>
 
@@ -178,7 +184,7 @@ export default function LoginScreen({ navigation }) {
         onPress={handleBackToAccountHub}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel="Voltar para o hub de contas"
+        accessibilityLabel={t('auth.a11y.backToHub')}
       >
         <ChevronIcon color={theme.textSecondary} size={32} />
       </PressableScale>
@@ -189,7 +195,7 @@ export default function LoginScreen({ navigation }) {
         onPress={toggleTheme}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={isDark ? 'Ativar tema claro' : 'Ativar tema escuro'}
+        accessibilityLabel={isDark ? t('auth.a11y.lightTheme') : t('auth.a11y.darkTheme')}
       >
         <Image
           source={isDark ? require('../../assets/icon-tema-claro.png') : require('../../assets/icon-tema-escuro.png')}
