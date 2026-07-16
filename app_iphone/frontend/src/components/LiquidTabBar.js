@@ -16,13 +16,11 @@ try { BlurView = require('expo-blur').BlurView; } catch (e) { BlurView = null; }
 // do sistema; fora dele (iOS mais antigo / Android) cai no BlurView simulado.
 const HAS_GLASS = isLiquidGlassAvailable();
 
-// Ripple radial aproximado por anéis concêntricos (sem lib).
-const RIPPLE_RINGS = [
-  { s: 1, o: 0.05 },
-  { s: 0.72, o: 0.08 },
-  { s: 0.46, o: 0.13 },
-  { s: 0.24, o: 0.22 },
-];
+// Ripple radial: um único círculo cujo falloff vem da sombra nativa (blur
+// gaussiano do Core Animation). Antes eram anéis concêntricos empilhados, o
+// que deixava degraus visíveis em vez de um gradiente contínuo.
+const RIPPLE_CORE = 0.42;   // diâmetro do núcleo, em fração do ripple
+const RIPPLE_BLUR = 0.34;   // raio da sombra, em fração do ripple
 
 export function useTabBarClearance() {
   const insets = useSafeAreaInsets();
@@ -166,7 +164,7 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
                 isInteractive
                 tintColor="rgba(10,132,255,0.4)"
                 colorScheme={theme.isDark ? 'dark' : 'light'}
-                style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
+                style={[StyleSheet.absoluteFill, { borderRadius: 999 }]}
               />
             ) : (
               <>
@@ -190,23 +188,24 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
               transform: [{ scale: rippleScale }],
             }}
           >
-            {RIPPLE_RINGS.map((c, i) => {
-              const sz = rippleD * c.s;
-              return (
-                <View
-                  key={i}
-                  style={{
-                    position: 'absolute',
-                    left: (rippleD - sz) / 2,
-                    top: (rippleD - sz) / 2,
-                    width: sz,
-                    height: sz,
-                    borderRadius: sz / 2,
-                    backgroundColor: `rgba(255,255,255,${c.o})`,
-                  }}
-                />
-              );
-            })}
+            <View
+              style={{
+                position: 'absolute',
+                left: (rippleD * (1 - RIPPLE_CORE)) / 2,
+                top: (rippleD * (1 - RIPPLE_CORE)) / 2,
+                width: rippleD * RIPPLE_CORE,
+                height: rippleD * RIPPLE_CORE,
+                borderRadius: (rippleD * RIPPLE_CORE) / 2,
+                backgroundColor: 'rgba(255,255,255,0.16)',
+                // O gradiente é a sombra: blur nativo, contínuo, sem banding.
+                // A escala do container escala a sombra junto, então o falloff
+                // se mantém proporcional durante toda a animação.
+                shadowColor: '#FFFFFF',
+                shadowOpacity: 0.9,
+                shadowRadius: rippleD * RIPPLE_BLUR,
+                shadowOffset: { width: 0, height: 0 },
+              }}
+            />
           </Animated.View>
         )}
 
@@ -254,14 +253,18 @@ function makeStyles(theme, hasBlur, hasGlass) {
       left: 0,
       right: 0,
       bottom: 0,
-      paddingHorizontal: 16,
+      // Mais recuo que o conteúdo das telas (16), pra barra não ficar alinhada
+      // com a borda dos cards e destacar como um elemento flutuante.
+      paddingHorizontal: 28,
       paddingTop: 6,
       backgroundColor: 'transparent',
     },
     bar: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: 30,
+      // Cápsula de verdade: raio fixo (30) ficava menor que metade da altura
+      // real da barra, deixando um trecho reto nas laterais.
+      borderRadius: 999,
       paddingHorizontal: H_PAD,
       paddingVertical: 7,
       backgroundColor: glassBar,
@@ -278,7 +281,7 @@ function makeStyles(theme, hasBlur, hasGlass) {
       position: 'absolute',
       top: 7,
       bottom: 7,
-      borderRadius: 24,
+      borderRadius: 999,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: hasGlass ? 'rgba(255,255,255,0.22)' : 'rgba(90,176,255,0.55)',
