@@ -11,6 +11,8 @@ O projeto existe em duas versões:
 
 Além dos lembretes por IA, o app iOS tem uma aba de **Tarefas** semanais — com prioridades, anotações, conclusão e reordenação por arraste (dentro da mesma prioridade) — e integração cruzada: segure uma tarefa para criar um lembrete, ou um lembrete para criar uma tarefa.
 
+O app é **bilíngue (português / inglês)** — o idioma da interface é escolhido no menu, sem tocar no conteúdo do usuário nem no chat (a IA responde em português); o formato de hora (12h/24h) segue o aparelho, não o idioma. Traz também **widgets nativos** (atalho de criar lembrete, próximo lembrete na tela de bloqueio e a lista de próximos, em azul ou neutro) que leem os dados via App Group, e **notificações ricas** via extensão nativa (o resumo diário/semanal e o lembrete expandido com pré-avisos "me avise antes").
+
 ---
 
 ## Sumário
@@ -191,7 +193,9 @@ npx expo export --platform web --output-dir dist-web-qa
 
 - `npx expo start` e Metro cobrem desenvolvimento local e mudanças JavaScript.
 - `eas update` (OTA) deve ser usado apenas para mudanças sem dependências nativas.
-- Quando entrar dependência nativa (ex.: `react-native-pager-view`), é obrigatório gerar novo build iOS com `eas build`.
+- Quando entrar dependência nativa (ex.: `react-native-pager-view`), código Swift dos targets (widget/extensão) ou mudança de entitlement, é obrigatório gerar novo build iOS com `eas build`.
+- O `runtimeVersion` é **fixo** (`'1.0.0'` no `app.config.js`), desamarrado da `version`: dá pra bumpar a versão de marketing sem invalidar o OTA. **Só suba o `runtimeVersion` quando o código nativo mudar** — senão um app antigo baixaria um JS que espera um módulo que ele não tem.
+- Widgets e extensão de notificação vivem em `app_iphone/frontend/targets/` (via `@bacons/apple-targets`). A categoria da extensão fica no `targets/resumo-notif/Info.plist` escrito à mão — o plugin ignora o campo `infoPlist` do `expo-target.config.js`.
 
 Após o build (~15 minutos), a Expo disponibilizará um link para download do arquivo `.ipa`. Instale no iPhone com [Sideloadly](https://sideloadly.io/) (Windows/Mac).
 
@@ -444,7 +448,7 @@ Edita título, horário e/ou recorrência. Permite tornar um lembrete pontual em
 
 #### `GET /reminders/sync` — Sincronizar agendamentos
 
-Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo frontend para manter as notificações locais sincronizadas.
+Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo frontend para manter as notificações locais sincronizadas. Os **disparos reais** (`scheduled_executions`) vêm separados dos **pré-avisos** (`pre_executions`, os "me avise antes") — cada pré-aviso traz `at` (quando dispara), `target` (o disparo a que se refere) e `lead_seconds` (a antecedência, que vira o "daqui a X" da notificação).
 
 **Response 200:**
 ```json
@@ -456,7 +460,14 @@ Retorna os próximos horários de execução de cada lembrete ativo. Usado pelo 
       "title": "Ligar pro dentista",
       "recurrence_str": null,
       "is_active": true,
-      "scheduled_executions": ["2026-04-16T09:00:00-03:00"]
+      "scheduled_executions": ["2026-04-16T09:00:00-03:00"],
+      "pre_executions": [
+        {
+          "at": "2026-04-15T09:00:00-03:00",
+          "target": "2026-04-16T09:00:00-03:00",
+          "lead_seconds": 86400
+        }
+      ]
     }
   ]
 }
