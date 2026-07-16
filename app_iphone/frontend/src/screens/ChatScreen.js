@@ -5,17 +5,18 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   SafeAreaView,
   Text,
   Animated,
+  Easing,
   Image,
   PanResponder,
   Dimensions,
   AppState,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
 import { sendMessage } from '../api/messages.api';
 import { deleteReminder, syncReminders, listReminders } from '../api/reminders.api';
@@ -27,6 +28,7 @@ import { tabPos, animateTabTo } from '../utils/tabSwipe';
 import { onCompose } from '../utils/composeIntent';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useI18n } from '../i18n';
 import MessageBubble from '../components/MessageBubble';
 import TypingIndicator from '../components/TypingIndicator';
 import ReminderAmbiguousModal from '../components/ReminderAmbiguousModal';
@@ -39,36 +41,45 @@ import { playReceiveSound, playSendSound, playMessageSound, playErrorSound, prel
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-function getGreeting(name) {
+// Recebe `t` por parâmetro: se resolvesse as strings no import, a saudação ficaria
+// congelada no idioma inicial.
+function getGreeting(t, name) {
   const hour = new Date().getHours();
   let period;
-  if (hour >= 0 && hour < 4) period = 'Boa madrugada';
-  else if (hour >= 4 && hour < 12) period = 'Bom dia';
-  else if (hour >= 12 && hour < 18) period = 'Boa tarde';
-  else period = 'Boa noite';
-  return `${period}, ${name}! O que você deseja se lembrar?`;
+  if (hour >= 0 && hour < 4) period = t('chat.greeting.dawn');
+  else if (hour >= 4 && hour < 12) period = t('chat.greeting.morning');
+  else if (hour >= 12 && hour < 18) period = t('chat.greeting.afternoon');
+  else period = t('chat.greeting.evening');
+  return t('chat.greeting', { period, name });
 }
 
 function generateId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-const BANNER_TITLES = {
-  reminder_created: 'Lembrete criado',
-  reminder_updated: 'Lembrete editado',
-  reminder_deleted: 'Lembrete removido',
+// Idem: mapa vira função pra resolver o título no momento do disparo.
+const bannerTitleKey = {
+  reminder_created: 'chat.banner.created',
+  reminder_updated: 'chat.banner.updated',
+  reminder_deleted: 'chat.banner.deleted',
 };
 
-function showReminderActionBanner(actionType, action) {
-  const title = BANNER_TITLES[actionType];
-  if (!title) return;
-  const body = action?.reminder?.title || action?.reminder_title || 'Lembrete';
-  displayLocalNotification(title, body, { silent: true });
+function showReminderActionBanner(t, actionType, action) {
+  // Só notifica se o app NÃO está aberto na frente. Com o usuário dentro do app,
+  // ele já vê o resultado na tela — a notificação de "lembrete criado" só polui.
+  // O feedback dentro do app é o som de resposta do chat, que toca à parte.
+  if (AppState.currentState === 'active') return;
+
+  const key = bannerTitleKey[actionType];
+  if (!key) return;
+  const body = action?.reminder?.title || action?.reminder_title || t('chat.banner.fallback');
+  displayLocalNotification(t(key), body, { silent: true });
 }
 
 export default function ChatScreen({ navigation }) {
   const { user } = useAuth();
   const { theme } = useTheme();
+  const { t, progresso } = useI18n();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [kbOpen, setKbOpen] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
@@ -78,7 +89,9 @@ export default function ChatScreen({ navigation }) {
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
   const sendFlyAnim = useRef(new Animated.Value(0)).current;
   const sendButtonAnim = useRef(new Animated.Value(0)).current;
+  const inputMargin = useRef(new Animated.Value(68)).current;
   const screenWidth = Dimensions.get('window').width;
+  const insets = useSafeAreaInsets();
 
   const swipePan = useRef(
     PanResponder.create({
@@ -192,7 +205,7 @@ export default function ChatScreen({ navigation }) {
           addMessage({
             id: generateId(),
             role: 'assistant',
-            content: 'Não consegui confirmar esse lembrete na sua lista. Pode tentar de novo?',
+            content: t('chat.error.notConfirmed'),
             timestamp: new Date().toISOString(),
             action: null,
             isError: true,
@@ -202,7 +215,7 @@ export default function ChatScreen({ navigation }) {
         console.warn('[ChatScreen] Erro ao confirmar criação do lembrete:', error);
       }
     },
-    [addMessage],
+    [addMessage, t],
   );
 
   useEffect(() => {
@@ -212,7 +225,11 @@ export default function ChatScreen({ navigation }) {
         {
           id: `greeting_${Date.now()}`,
           role: 'assistant',
-          content: getGreeting(user?.name || 'você'),
+          // `saudacao: true` em vez do texto pronto: guardar a string no estado
+          // a congelaria no idioma (e no quadro do embaralho) do momento em que
+          // a mensagem nasceu. O texto é resolvido no render, abaixo.
+          saudacao: true,
+          content: '',
           timestamp: new Date().toISOString(),
           action: null,
         },
@@ -223,7 +240,7 @@ export default function ChatScreen({ navigation }) {
     }, 650);
 
     return () => clearTimeout(timer);
-  }, [scrollToBottom, user?.name]);
+  }, [scrollToBottom, user?.name, t]);
 
   useEffect(() => {
     let isMounted = true;
@@ -244,17 +261,17 @@ export default function ChatScreen({ navigation }) {
       addMessage({
         id: result.message_id || generateId(),
         role: 'assistant',
-        content: `${result.response}\n\nenviado da fila (você estava sem conexão)`,
+        content: `${result.response}\n\n${t('chat.queuedNote')}`,
         timestamp: new Date().toISOString(),
         action: result.action || null,
       });
-      const t = result.action?.type;
-      if (t === 'reminder_created' || t === 'reminder_updated' || t === 'reminder_deleted') {
+      const tipo = result.action?.type;
+      if (tipo === 'reminder_created' || tipo === 'reminder_updated' || tipo === 'reminder_deleted') {
         await handleSync();
-        showReminderActionBanner(t, result.action);
+        showReminderActionBanner(t, tipo, result.action);
       }
     });
-  }, [addMessage, handleSync]);
+  }, [addMessage, handleSync, t]);
 
   // Reenvia a fila quando a conexão volta.
   useEffect(() => {
@@ -281,13 +298,32 @@ export default function ChatScreen({ navigation }) {
     }).start();
   }, [canSend, sendButtonAnim]);
 
-  // Com a tab bar flutuante, o input fica acima dela; ao abrir o teclado, some
-  // o respiro pra não criar buraco entre input e teclado.
+  // Um único valor controla o espaço abaixo do input, sincronizado com o teclado.
+  // Sem KeyboardAvoidingView de propósito: ele empurra por padding próprio E a
+  // margem animava por conta — o input era empurrado por dois lados e o
+  // movimento saía "vindo de cima". Aqui é UMA fonte: fechado = 68 (respiro da
+  // tab bar flutuante); aberto = altura do teclado. Mesma curva e duração dele.
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', () => setKbOpen(true));
-    const hide = Keyboard.addListener('keyboardWillHide', () => setKbOpen(false));
+    const show = Keyboard.addListener('keyboardWillShow', e => {
+      setKbOpen(true);
+      Animated.timing(inputMargin, {
+        toValue: Math.max(0, e.endCoordinates.height - insets.bottom),
+        duration: e.duration || 250,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false, // paddingBottom é layout
+      }).start();
+    });
+    const hide = Keyboard.addListener('keyboardWillHide', e => {
+      setKbOpen(false);
+      Animated.timing(inputMargin, {
+        toValue: 68,
+        duration: e.duration || 250,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }).start();
+    });
     return () => { show.remove(); hide.remove(); };
-  }, []);
+  }, [inputMargin, insets.bottom]);
 
   const handleSend = async overrideContent => {
     const useOverride = typeof overrideContent === 'string';
@@ -363,7 +399,7 @@ export default function ChatScreen({ navigation }) {
         actionType === 'reminder_deleted'
       ) {
         await handleSync();
-        showReminderActionBanner(actionType, result.action);
+        showReminderActionBanner(t, actionType, result.action);
         if (actionType === 'reminder_created') {
           await confirmReminderCreated(result.action.reminder);
         }
@@ -389,7 +425,7 @@ export default function ChatScreen({ navigation }) {
         addMessage({
           id: generateId(),
           role: 'assistant',
-          content: 'Sem conexão agora.\nVou enviar assim que a internet voltar.',
+          content: t('chat.error.offline'),
           timestamp: new Date().toISOString(),
           action: null,
           isError: true,
@@ -400,13 +436,13 @@ export default function ChatScreen({ navigation }) {
         let errLine = '';
         if (errCode && errStatus) errLine = `${errCode} · ${errStatus}`;
         else if (errCode) errLine = errCode;
-        else if (errStatus) errLine = `ERRO ${errStatus}`;
-        else errLine = 'ERRO DESCONHECIDO';
+        else if (errStatus) errLine = t('chat.error.status', { status: errStatus });
+        else errLine = t('chat.error.unknown');
 
         addMessage({
           id: generateId(),
           role: 'assistant',
-          content: `Não consegui me conectar ao servidor.\n${errLine}\nTente novamente.`,
+          content: t('chat.error.server', { err: errLine }),
           timestamp: new Date().toISOString(),
           action: null,
           isError: true,
@@ -426,7 +462,7 @@ export default function ChatScreen({ navigation }) {
       addMessage({
         id: generateId(),
         role: 'assistant',
-        content: 'Lembrete deletado com sucesso! ✓',
+        content: t('chat.deleteOk'),
         timestamp: new Date().toISOString(),
         action: null,
       });
@@ -435,7 +471,7 @@ export default function ChatScreen({ navigation }) {
       addMessage({
         id: generateId(),
         role: 'assistant',
-        content: 'Não consegui deletar o lembrete. Tente novamente.',
+        content: t('chat.deleteFail'),
         timestamp: new Date().toISOString(),
         action: null,
       });
@@ -448,7 +484,17 @@ export default function ChatScreen({ navigation }) {
     setAmbiguousCandidates([]);
   };
 
-  const renderItem = useCallback(({ item }) => <MessageBubble message={item} />, []);
+  const renderItem = useCallback(
+    ({ item }) => {
+      const msg = item.saudacao
+        ? { ...item, content: getGreeting(t, user?.name || t('chat.greeting.you')) }
+        : item;
+      return <MessageBubble message={msg} />;
+    },
+    // `progresso` nas dependências: é o que refaz a saudação a cada quadro do
+    // embaralho (o `t` do módulo tem identidade estável e não avisaria nada).
+    [t, progresso, user?.name],
+  );
   const keyExtractor = useCallback(item => item.id, []);
 
   return (
@@ -474,7 +520,7 @@ export default function ChatScreen({ navigation }) {
         <PressableScale
           onPress={() => setMenuVisible(true)}
           hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}
-          accessibilityLabel="Menu"
+          accessibilityLabel={t('chat.menuA11y')}
           accessibilityRole="button"
         >
           <HamburgerIcon />
@@ -483,7 +529,7 @@ export default function ChatScreen({ navigation }) {
 
       {!hasNotifPermission && <NotificationPermissionBanner />}
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <Animated.View style={[styles.flex, { paddingBottom: inputMargin }]}>
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -512,11 +558,11 @@ export default function ChatScreen({ navigation }) {
           </View>
         ) : null}
 
-        <View style={[styles.inputContainer, { marginBottom: kbOpen ? 0 : 68 }]}>
+        <View style={styles.inputContainer}>
           <TextInput
             ref={inputRef}
             style={[styles.textInput, inputFocused && styles.textInputFocused]}
-            placeholder="Digite uma mensagem..."
+            placeholder={t('chat.inputPlaceholder')}
             placeholderTextColor={theme.textPlaceholder}
             value={inputText}
             onChangeText={setInputText}
@@ -528,7 +574,7 @@ export default function ChatScreen({ navigation }) {
             onFocus={() => { isInputFocusedRef.current = true; setInputFocused(true); }}
             onBlur={() => { isInputFocusedRef.current = false; setInputFocused(false); }}
             contextMenuHidden={false}
-            accessibilityLabel="Campo de mensagem"
+            accessibilityLabel={t('chat.inputA11y')}
           />
           <AnimatedTouchableOpacity
             style={[
@@ -544,7 +590,7 @@ export default function ChatScreen({ navigation }) {
             disabled={!canSend}
             activeOpacity={0.75}
             accessibilityRole="button"
-            accessibilityLabel="Enviar mensagem"
+            accessibilityLabel={t('chat.sendA11y')}
             accessibilityState={{ disabled: !canSend }}
           >
             {isLoading ? (
@@ -592,7 +638,7 @@ export default function ChatScreen({ navigation }) {
             </Animated.View>
           ) : null}
         </View>
-      </KeyboardAvoidingView>
+      </Animated.View>
 
       <ReminderAmbiguousModal
         visible={showAmbiguousModal}

@@ -7,12 +7,10 @@ import {
   StyleSheet,
   Alert,
   RefreshControl,
-  SafeAreaView,
   Modal,
   TextInput,
   KeyboardAvoidingView,
   Keyboard,
-  LayoutAnimation,
   Platform,
   PanResponder,
   Animated,
@@ -21,13 +19,19 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
+// SafeAreaView do safe-area-context (não o do react-native): dá pra escolher as
+// bordas. Só o topo é protegido — embaixo a lista corre até o fim da tela e
+// passa por trás do tab bar, em vez de parar na deadzone do home indicator.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import CalendarPicker from '../components/CalendarPicker';
 import TimePickerNative from '../components/TimePickerNative';
 import { detectIs12h } from '../utils/timeFormat';
 import { formatTodayLabel, getWeekKey } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
+import { recurrenceLabel } from '../utils/recurrenceLabel';
 import { onEditReminder } from '../utils/editReminderIntent';
 import PreReminderPicker from '../components/PreReminderPicker';
+import AnimatedExpand from '../components/AnimatedExpand';
 import { useTabBarClearance } from '../components/LiquidTabBar';
 import { useFocusEffect } from '@react-navigation/native';
 import useFocusEntrance from '../hooks/useFocusEntrance';
@@ -40,62 +44,16 @@ import HamburgerMenu, { HamburgerIcon } from '../components/HamburgerMenu';
 import TaskModal from '../components/TaskModal';
 import { createTask } from '../api/tasks.api';
 import PressableScale from '../components/PressableScale';
+import { anim, getLocale, t, useI18n } from '../i18n';
 
 const IS_12H = detectIs12h();
 
-function AnimatedExpand({ visible, children, expandedHeight = 400 }) {
-  const progress = useRef(new Animated.Value(0)).current;
-  const [mounted, setMounted] = useState(false);
-  const mountedRef = useRef(false);
-
-  useEffect(() => {
-    if (visible) {
-      mountedRef.current = true;
-      setMounted(true);
-      progress.setValue(0);
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 360,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
-    } else if (mountedRef.current) {
-      Animated.timing(progress, {
-        toValue: 0,
-        duration: 300,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: false,
-      }).start(({ finished }) => {
-        if (finished) {
-          mountedRef.current = false;
-          setMounted(false);
-        }
-      });
-    }
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!mounted) return null;
-
-  return (
-    <Animated.View
-      style={{
-        maxHeight: progress.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, expandedHeight],
-        }),
-        opacity: progress,
-        overflow: 'hidden',
-      }}
-    >
-      {children}
-    </Animated.View>
-  );
-}
-
+// anim(): datas vêm do Intl, não do dicionário — sem passar por aqui elas
+// ficariam paradas enquanto o resto da tela embaralha na troca de idioma.
 function formatDateTime(isoString) {
   if (!isoString) return '';
   const date = new Date(isoString);
-  return new Intl.DateTimeFormat('pt-BR', {
+  return anim(new Intl.DateTimeFormat(getLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -103,12 +61,12 @@ function formatDateTime(isoString) {
     minute: '2-digit',
     hour12: IS_12H,
     timeZone: 'America/Sao_Paulo',
-  }).format(date);
+  }).format(date));
 }
 
 function formatDateLabel(date) {
   if (!date) return '';
-  return new Intl.DateTimeFormat('pt-BR', {
+  return new Intl.DateTimeFormat(getLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -179,26 +137,26 @@ function bucketFor(date) {
   const dk = spDateKey(date);
   const nk = spDateKey(new Date());
   const diff = daysBetweenKeys(nk, dk);
-  if (diff <= 0) return { key: 'b-hoje', order: 0, label: 'Hoje' };
-  if (diff === 1) return { key: 'b-amanha', order: 1, label: 'Amanhã' };
+  if (diff <= 0) return { key: 'b-hoje', order: 0, label: t('common.today') };
+  if (diff === 1) return { key: 'b-amanha', order: 1, label: t('common.tomorrow') };
 
   const daysLeftThisWeek = 6 - weekdayIdx(nk); // até domingo desta semana
   if (diff <= daysLeftThisWeek) {
-    const wd = new Intl.DateTimeFormat('pt-BR', { timeZone: SP_TZ, weekday: 'long' }).format(date);
-    return { key: `d-${dk}`, order: 10 + diff, label: cap(wd) };
+    const wd = new Intl.DateTimeFormat(getLocale(), { timeZone: SP_TZ, weekday: 'long' }).format(date);
+    return { key: `d-${dk}`, order: 10 + diff, label: anim(cap(wd)) };
   }
 
   const weeksAhead = Math.ceil((diff - daysLeftThisWeek) / 7);
-  if (weeksAhead === 1) return { key: 'w1', order: 100, label: 'Semana que vem' };
-  if (weeksAhead === 2) return { key: 'w2', order: 101, label: 'Daqui 2 semanas' };
-  if (weeksAhead === 3) return { key: 'w3', order: 102, label: 'Daqui 3 semanas' };
+  if (weeksAhead === 1) return { key: 'w1', order: 100, label: t('reminders.bucket.nextWeek') };
+  if (weeksAhead === 2) return { key: 'w2', order: 101, label: t('reminders.bucket.inWeeks', { n: 2 }) };
+  if (weeksAhead === 3) return { key: 'w3', order: 102, label: t('reminders.bucket.inWeeks', { n: 3 }) };
 
   const [ny, nm] = nk.split('-').map(Number);
   const [dy, dmo] = dk.split('-').map(Number);
   const monthsAhead = (dy - ny) * 12 + (dmo - nm);
-  if (monthsAhead <= 1) return { key: 'm1', order: 200, label: 'Mês que vem' };
-  const mn = new Intl.DateTimeFormat('pt-BR', { timeZone: SP_TZ, month: 'long' }).format(date);
-  return { key: `mo-${dy}-${dmo}`, order: 200 + monthsAhead, label: cap(mn) };
+  if (monthsAhead <= 1) return { key: 'm1', order: 200, label: t('reminders.bucket.nextMonth') };
+  const mn = new Intl.DateTimeFormat(getLocale(), { timeZone: SP_TZ, month: 'long' }).format(date);
+  return { key: `mo-${dy}-${dmo}`, order: 200 + monthsAhead, label: anim(cap(mn)) };
 }
 
 // Agrupa TODOS os lembretes (pontuais E recorrentes) pelos buckets acima,
@@ -219,23 +177,38 @@ function groupRemindersByBucket(reminders) {
   return { groups, noDate };
 }
 
+// Listas de rótulos são FUNÇÕES: como constante, seriam avaliadas no import e
+// ficariam presas ao idioma que estava valendo naquele momento.
 // Convenção weekday(): Seg=0 .. Dom=6
-const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-const DAY_PRESETS = [
-  { label: 'Dias úteis', days: [0, 1, 2, 3, 4] },
-  { label: 'Fim de semana', days: [5, 6] },
-  { label: 'Todo dia', days: [0, 1, 2, 3, 4, 5, 6] },
+const dayLabels = () => [
+  t('day.mon'), t('day.tue'), t('day.wed'), t('day.thu'), t('day.fri'), t('day.sat'), t('day.sun'),
+];
+const dayPresets = () => [
+  { key: 'weekdays', label: t('reminders.dayPreset.weekdays'), days: [0, 1, 2, 3, 4] },
+  { key: 'weekend', label: t('reminders.dayPreset.weekend'), days: [5, 6] },
+  { key: 'everyday', label: t('reminders.dayPreset.everyDay'), days: [0, 1, 2, 3, 4, 5, 6] },
 ];
 
 // Tipos de recorrência expostos na edição. `key` casa com o backend.
-const RECURRENCE_TYPES = [
-  { key: 'once', label: 'Único' },
-  { key: 'daily', label: 'Todo dia' },
-  { key: 'weekly_days', label: 'Dias da semana' },
-  { key: 'weekly', label: 'Toda semana' },
-  { key: 'monthly', label: 'Todo mês' },
-  { key: 'interval_seconds', label: 'Intervalo' },
+const recurrenceTypes = () => [
+  { key: 'once', label: t('reminders.recurrence.once') },
+  { key: 'daily', label: t('reminders.recurrence.daily') },
+  { key: 'weekly_days', label: t('reminders.recurrence.weeklyDays') },
+  { key: 'weekly', label: t('reminders.recurrence.weekly') },
+  { key: 'monthly', label: t('reminders.recurrence.monthly') },
+  { key: 'interval_seconds', label: t('reminders.recurrence.interval') },
 ];
+
+const intervalUnits = () => [
+  { key: 'hours', label: t('reminders.unit.hours') },
+  { key: 'days', label: t('reminders.unit.days') },
+];
+
+// "Nenhum" / "1 aviso antes" / "N avisos antes".
+function preCountLabel(n) {
+  if (!n) return t('common.none');
+  return n === 1 ? t('reminders.form.preCountOne') : t('reminders.form.preCountMany', { n });
+}
 
 // Tipos que precisam de uma data de referência (calendário).
 const TYPES_WITH_DATE = new Set(['once', 'weekly', 'monthly']);
@@ -264,6 +237,9 @@ function intervalFromSeconds(seconds) {
 }
 
 function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
+  // `lang` só está aqui pra assinar o contexto: sem consumir o contexto, trocar
+  // de idioma não re-renderizaria este componente.
+  const { lang, progresso } = useI18n();
   const [title, setTitle] = useState('');
   const [recurrence, setRecurrence] = useState('once');
   const [selectedDate, setSelectedDate] = useState(null);
@@ -272,17 +248,61 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   const [intervalValue, setIntervalValue] = useState('1');
   const [intervalUnit, setIntervalUnit] = useState('days');
   const [preReminders, setPreReminders] = useState([]);
+  const [preOpen, setPreOpen] = useState(false);
+  const [preTimeOpen, setPreTimeOpen] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState({});
-  const [kbHeight, setKbHeight] = useState(0);
   const styles = useMemo(() => makeModalStyles(theme), [theme]);
   const needsDate = TYPES_WITH_DATE.has(recurrence);
 
+  const tipos = useMemo(() => recurrenceTypes(), [lang, progresso]);
+  const presetsDias = useMemo(() => dayPresets(), [lang, progresso]);
+  const rotulosDias = useMemo(() => dayLabels(), [lang, progresso]);
+  const unidades = useMemo(() => intervalUnits(), [lang, progresso]);
+
+  // O sheet fica ancorado no rodapé e o teclado sobe POR CIMA dele — quem
+  // empurra o conteúdo é o automaticallyAdjustKeyboardInsets do ScrollView.
   const sheetTranslateY = useRef(new Animated.Value(400)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
-  const keyboardOffset = useRef(new Animated.Value(0)).current;
+  const scrollRef = useRef(null);
+  const scrollYRef = useRef(0);
+
+  // Y de cada seção expansível (medido no onLayout do botão que a abre).
+  const sectionY = useRef({});
+
+  // O scroll tem que esperar a expansão TERMINAR: enquanto ela roda, o conteúdo
+  // ainda está crescendo, o destino seria clampado pelo scroll máximo do momento
+  // e re-scrollar a cada frame brigaria com a própria animação.
+  const REVEAL_DELAY = 440; // ~duração do AnimatedExpand ao abrir
+
+  const revealSection = key => {
+    setTimeout(() => {
+      const y = sectionY.current[key];
+      if (y != null) scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+    }, REVEAL_DELAY);
+  };
+
+  const toggleSection = (key, isOpen, setOpen) => {
+    const opening = !isOpen;
+    setOpen(opening);
+    if (opening) revealSection(key);
+  };
+
+  // O rolete abre no fim do conteúdo — rola até embaixo.
+  const revealEnd = () => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), REVEAL_DELAY);
+  };
+
+  const togglePre = () => toggleSection('pre', preOpen, setPreOpen);
+
+  // O teclado nativo cola o campo focado na sua borda — dá um respiro. O delay
+  // é curto de propósito: o empurrão anda junto com a animação do teclado, em
+  // vez de acontecer depois que ela já terminou.
+  const nudgeAboveKeyboard = () => {
+    setTimeout(() => scrollRef.current?.scrollTo({ y: scrollYRef.current + 28, animated: true }), 120);
+  };
 
   const panResponder = useRef(
     PanResponder.create({
@@ -296,7 +316,6 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
         // Fecha com arrasto curto (60px) OU com flick pra baixo (velocidade).
         if (g.dy > 60 || g.vy > 0.5) {
           Keyboard.dismiss();
-          keyboardOffset.setValue(0);
           Animated.timing(sheetTranslateY, { toValue: 500, duration: 220, useNativeDriver: true }).start(onClose);
           Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
         } else {
@@ -323,30 +342,15 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
       setTimePickerVisible(false);
       sheetTranslateY.setValue(400);
       overlayOpacity.setValue(0);
-      keyboardOffset.setValue(0);
       Animated.parallel([
         Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
         Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true, tension: 68, friction: 11 }),
       ]).start();
     }
-  }, [visible, reminder, sheetTranslateY, overlayOpacity, keyboardOffset]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const show = Keyboard.addListener('keyboardWillShow', e => {
-      setKbHeight(e.endCoordinates.height);
-      Animated.timing(keyboardOffset, { toValue: -e.endCoordinates.height, duration: e.duration || 250, useNativeDriver: true }).start();
-    });
-    const hide = Keyboard.addListener('keyboardWillHide', e => {
-      setKbHeight(0);
-      Animated.timing(keyboardOffset, { toValue: 0, duration: e.duration || 250, useNativeDriver: true }).start();
-    });
-    return () => { show.remove(); hide.remove(); };
-  }, [visible, keyboardOffset]);
+  }, [visible, reminder, sheetTranslateY, overlayOpacity]);
 
   const handleClose = () => {
     Keyboard.dismiss();
-    keyboardOffset.setValue(0);
     Animated.parallel([
       Animated.timing(overlayOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
       Animated.timing(sheetTranslateY, { toValue: 400, duration: 220, useNativeDriver: true }),
@@ -354,12 +358,12 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
   };
 
   const toggleCalendar = () => {
-    setCalendarVisible(v => !v);
+    toggleSection('date', calendarVisible, setCalendarVisible);
     if (timePickerVisible) setTimePickerVisible(false);
   };
 
   const toggleTimePicker = () => {
-    setTimePickerVisible(v => !v);
+    toggleSection('time', timePickerVisible, setTimePickerVisible);
     if (calendarVisible) setCalendarVisible(false);
   };
 
@@ -378,17 +382,17 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
 
   const handleSave = async () => {
     const newErrors = {};
-    if (!title.trim()) newErrors.title = 'Título é obrigatório';
+    if (!title.trim()) newErrors.title = t('reminders.error.titleRequired');
     if (recurrence === 'weekly_days' && selectedDays.length === 0) {
-      newErrors.days = 'Selecione ao menos um dia';
+      newErrors.days = t('reminders.error.pickDay');
     }
     if (needsDate && !selectedDate) {
-      newErrors.datetime = 'Selecione uma data';
+      newErrors.datetime = t('reminders.error.pickDate');
     }
     let intervalSeconds = null;
     if (recurrence === 'interval_seconds') {
       const n = parseInt(intervalValue, 10);
-      if (!n || n <= 0) newErrors.interval = 'Informe um intervalo válido';
+      if (!n || n <= 0) newErrors.interval = t('reminders.error.interval');
       else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : 3600);
     }
     if (Object.keys(newErrors).length > 0) {
@@ -421,31 +425,36 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <Animated.View style={[styles.sheet, kbHeight > 0 && { maxHeight: Dimensions.get('window').height - kbHeight - 70 }, { transform: [{ translateY: Animated.add(sheetTranslateY, keyboardOffset) }] }]}>
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
           <View style={styles.handleArea} {...panResponder.panHandlers}>
             <View style={styles.handle} />
           </View>
 
           <ScrollView
+            ref={scrollRef}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets
+            scrollEventThrottle={16}
+            onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
           >
-            <Text style={styles.sheetTitle}>Editar lembrete</Text>
+            <Text style={styles.sheetTitle}>{t('reminders.form.editTitle')}</Text>
 
-            <Text style={styles.label}>Título</Text>
+            <Text style={styles.label}>{t('reminders.form.titleLabel')}</Text>
             <TextInput
               style={[styles.input, errors.title && styles.inputError]}
               value={title}
               onChangeText={text => { setTitle(text); if (errors.title) setErrors(e => ({ ...e, title: null })); }}
-              placeholder="Nome do lembrete"
+              placeholder={t('reminders.form.titlePlaceholder')}
               placeholderTextColor={theme.textPlaceholder}
+              onFocus={nudgeAboveKeyboard}
               autoCapitalize="sentences"
               editable={!isSaving}
             />
             {errors.title ? <Text style={styles.fieldError}>{errors.title}</Text> : null}
 
-            <Text style={styles.label}>Recorrência</Text>
+            <Text style={styles.label}>{t('reminders.form.recurrenceLabel')}</Text>
             <View style={styles.typeScrollWrap}>
               <ScrollView
                 horizontal
@@ -453,21 +462,20 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                 contentContainerStyle={styles.typeRow}
                 keyboardShouldPersistTaps="handled"
               >
-                {RECURRENCE_TYPES.map(t => {
-                  const active = recurrence === t.key;
+                {tipos.map(tipo => {
+                  const active = recurrence === tipo.key;
                   return (
                     <PressableScale
-                      key={t.key}
+                      key={tipo.key}
                       style={[styles.typeChip, active && { backgroundColor: SECTOR_TINTS.type, borderColor: SECTOR_TINTS.type }]}
                       onPress={() => {
-                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                        setRecurrence(t.key);
+                        setRecurrence(tipo.key);
                         setCalendarVisible(false);
                         setErrors(e => ({ ...e, days: null, datetime: null, interval: null }));
                       }}
                       disabled={isSaving}
                     >
-                      <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{t.label}</Text>
+                      <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{tipo.label}</Text>
                     </PressableScale>
                   );
                 })}
@@ -481,18 +489,17 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
               </View>
             </View>
 
-            {recurrence === 'weekly_days' && (
+            <AnimatedExpand visible={recurrence === 'weekly_days'}>
               <>
-                <Text style={[styles.label, { marginTop: 14 }]}>Dias da semana</Text>
+                <Text style={[styles.label, { marginTop: 14 }]}>{t('reminders.form.weekdaysLabel')}</Text>
                 <View style={styles.presetRow}>
-                  {DAY_PRESETS.map(p => {
+                  {presetsDias.map(p => {
                     const active = sameDays(selectedDays, p.days);
                     return (
                       <PressableScale
-                        key={p.label}
+                        key={p.key}
                         style={[styles.preset, active && { backgroundColor: SECTOR_TINTS.preset, borderColor: SECTOR_TINTS.preset }]}
                         onPress={() => {
-                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                           setSelectedDays(p.days);
                           if (errors.days) setErrors(e => ({ ...e, days: null }));
                         }}
@@ -504,7 +511,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                   })}
                 </View>
                 <View style={styles.pillRow}>
-                  {DAY_LABELS.map((lbl, idx) => {
+                  {rotulosDias.map((lbl, idx) => {
                     const on = selectedDays.includes(idx);
                     return (
                       <PressableScale
@@ -520,11 +527,11 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                 </View>
                 {errors.days ? <Text style={styles.fieldError}>{errors.days}</Text> : null}
               </>
-            )}
+            </AnimatedExpand>
 
-            {recurrence === 'interval_seconds' && (
+            <AnimatedExpand visible={recurrence === 'interval_seconds'}>
               <>
-                <Text style={[styles.label, { marginTop: 14 }]}>A cada</Text>
+                <Text style={[styles.label, { marginTop: 14 }]}>{t('reminders.form.everyLabel')}</Text>
                 <View style={styles.intervalRow}>
                   <TextInput
                     style={[styles.intervalInput, errors.interval && styles.inputError]}
@@ -535,12 +542,10 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                     }}
                     keyboardType="number-pad"
                     maxLength={4}
+                    onFocus={nudgeAboveKeyboard}
                     editable={!isSaving}
                   />
-                  {[
-                    { key: 'hours', label: 'horas' },
-                    { key: 'days', label: 'dias' },
-                  ].map(u => {
+                  {unidades.map(u => {
                     const active = intervalUnit === u.key;
                     return (
                       <PressableScale
@@ -556,22 +561,25 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                 </View>
                 {errors.interval ? <Text style={styles.fieldError}>{errors.interval}</Text> : null}
               </>
-            )}
+            </AnimatedExpand>
 
-            {needsDate && (
+            <AnimatedExpand visible={needsDate}>
               <>
-                <Text style={[styles.label, { marginTop: 14 }]}>{recurrence === 'once' ? 'Data' : 'A partir de'}</Text>
+                <Text style={[styles.label, { marginTop: 14 }]}>
+                  {recurrence === 'once' ? t('reminders.form.dateLabel') : t('reminders.form.startingLabel')}
+                </Text>
                 <Pressable
                   style={[styles.dateButton, errors.datetime && styles.inputError, calendarVisible && styles.dateButtonActive]}
                   onPress={toggleCalendar}
+                  onLayout={e => { sectionY.current.date = e.nativeEvent.layout.y; }}
                   disabled={isSaving}
                 >
                   <Text style={selectedDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
-                    {selectedDate ? formatDateLabel(selectedDate) : 'Selecionar data'}
+                    {selectedDate ? formatDateLabel(selectedDate) : t('reminders.form.selectDate')}
                   </Text>
                   <Text style={[styles.dateChevron, calendarVisible && styles.dateChevronOpen]}>›</Text>
                 </Pressable>
-                <AnimatedExpand visible={calendarVisible} expandedHeight={340}>
+                <AnimatedExpand visible={calendarVisible}>
                   <CalendarPicker
                     selectedDate={selectedDate}
                     onSelect={handleDaySelect}
@@ -579,12 +587,13 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
                   />
                 </AnimatedExpand>
               </>
-            )}
+            </AnimatedExpand>
 
-            <Text style={[styles.label, { marginTop: 14 }]}>Horário</Text>
+            <Text style={[styles.label, { marginTop: 14 }]}>{t('reminders.form.timeLabel')}</Text>
             <Pressable
               style={[styles.dateButton, timePickerVisible && styles.dateButtonActive]}
               onPress={toggleTimePicker}
+              onLayout={e => { sectionY.current.time = e.nativeEvent.layout.y; }}
               disabled={isSaving}
             >
               <Text style={styles.dateButtonText}>
@@ -594,7 +603,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
               </Text>
               <Text style={[styles.dateChevron, timePickerVisible && styles.dateChevronOpen]}>›</Text>
             </Pressable>
-            <AnimatedExpand visible={timePickerVisible} expandedHeight={175}>
+            <AnimatedExpand visible={timePickerVisible}>
               <TimePickerNative
                 value={pickerTime}
                 onChange={setPickerTime}
@@ -604,18 +613,39 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
             </AnimatedExpand>
             {errors.datetime ? <Text style={styles.fieldError}>{errors.datetime}</Text> : null}
 
-            <Text style={[styles.label, { marginTop: 14 }]}>Me avise antes (opcional)</Text>
-            <PreReminderPicker value={preReminders} onChange={setPreReminders} theme={theme} />
+            <Text style={[styles.label, { marginTop: 14 }]}>{t('reminders.form.preLabel')}</Text>
+            <Pressable
+              style={[styles.dateButton, preOpen && styles.dateButtonActive]}
+              onPress={togglePre}
+              onLayout={e => { sectionY.current.pre = e.nativeEvent.layout.y; }}
+            >
+              <Text style={styles.dateButtonText}>{preCountLabel(preReminders.length)}</Text>
+              <Text style={[styles.dateChevron, preOpen && styles.dateChevronOpen]}>›</Text>
+            </Pressable>
+            <AnimatedExpand visible={preOpen}>
+              <View style={{ paddingTop: 10 }}>
+                <PreReminderPicker
+                  value={preReminders}
+                  onChange={setPreReminders}
+                  theme={theme}
+                  defaultTime={pickerTime}
+                  is12h={IS_12H}
+                  timeOpen={preTimeOpen}
+                  onToggleTime={open => { setPreTimeOpen(open); if (open) revealEnd(); }}
+                  onInputFocus={nudgeAboveKeyboard}
+                />
+              </View>
+            </AnimatedExpand>
 
             <View style={styles.buttons}>
               <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={handleClose} disabled={isSaving}>
-                <Text style={[styles.btnText, styles.btnCancelText]}>Cancelar</Text>
+                <Text style={[styles.btnText, styles.btnCancelText]}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnSave]} onPress={handleSave} disabled={isSaving}>
                 {isSaving ? (
                   <LoadingDog size={28} color="#FFFFFF" />
                 ) : (
-                  <Text style={[styles.btnText, styles.btnSaveText]}>Salvar</Text>
+                  <Text style={[styles.btnText, styles.btnSaveText]}>{t('common.save')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -627,6 +657,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
 }
 
 function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
+  useI18n(); // assina o contexto: re-renderiza quando o idioma muda
   const styles = useMemo(() => makeItemStyles(theme), [theme]);
   const pressAnim = useRef(new Animated.Value(1)).current;
   const hintAnim = useRef(new Animated.Value(0)).current;
@@ -651,7 +682,7 @@ function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
         style={[styles.hintBalloon, { opacity: hintAnim, transform: [{ scale: hintAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }, { translateY: hintAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}
         pointerEvents="none"
       >
-        <Text style={styles.hintBalloonText}>Soltar para criar tarefa</Text>
+        <Text style={styles.hintBalloonText}>{t('reminders.releaseToCreateTask')}</Text>
       </Animated.View>
     )}
     <Pressable
@@ -674,8 +705,8 @@ function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
       <View style={styles.itemContent}>
         <Text style={styles.itemTitle}>{reminder.title}</Text>
         <Text style={styles.itemDate}>{formatDateTime(reminder.next_execution)}</Text>
-        {reminder.recurrence_str ? (
-          <Text style={styles.itemRecurrence}>{reminder.recurrence_str}</Text>
+        {recurrenceLabel(reminder) ? (
+          <Text style={styles.itemRecurrence}>{recurrenceLabel(reminder)}</Text>
         ) : null}
       </View>
       <TouchableOpacity
@@ -683,7 +714,7 @@ function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
         onPress={() => onDelete(reminder)}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
-        accessibilityLabel={`Deletar lembrete ${reminder.title}`}
+        accessibilityLabel={t('reminders.deleteA11y', { title: reminder.title })}
       >
         <Text style={styles.deleteButtonText}>✕</Text>
       </TouchableOpacity>
@@ -694,6 +725,7 @@ function ReminderItem({ reminder, onEdit, onDelete, onCreateTask, theme }) {
 
 export default function RemindersScreen({ navigation }) {
   const { theme } = useTheme();
+  useI18n(); // assina o contexto: re-renderiza quando o idioma muda
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const tabClear = useTabBarClearance();
   const entrance = useFocusEntrance(2);
@@ -795,7 +827,7 @@ export default function RemindersScreen({ navigation }) {
       setReminders(data.reminders || []);
       hasLoadedRemindersRef.current = true;
     } catch (err) {
-      setError('Erro ao carregar lembretes. Puxe para atualizar.');
+      setError(t('reminders.loadError'));
       console.warn('[RemindersScreen] Erro ao carregar:', err);
     } finally {
       setIsLoading(false);
@@ -832,12 +864,12 @@ export default function RemindersScreen({ navigation }) {
     try {
       await createTask({ name, priority, notes, week_key: getWeekKey(new Date()) });
     } catch (err) {
-      Alert.alert('Erro', 'Não foi possível criar a tarefa.');
+      Alert.alert(t('reminders.errorTitle'), t('reminders.taskFailed'));
       console.warn('[RemindersScreen] criar tarefa:', err);
       return;
     }
     setTaskDraftName(null);
-    Alert.alert('Pronto', 'Tarefa criada a partir do lembrete!');
+    Alert.alert(t('reminders.taskDoneTitle'), t('reminders.taskDoneMessage'));
   };
 
   const confirmDelete = async () => {
@@ -845,14 +877,13 @@ export default function RemindersScreen({ navigation }) {
     if (!reminder) return;
 
     setDeletingReminder(null);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setReminders(prev => prev.filter(r => r.id !== reminder.id));
     try {
       await deleteReminder(reminder.id);
       const syncData = await syncReminders();
       await scheduleFromSync(syncData);
     } catch (err) {
-      Alert.alert('Erro', 'Não foi possível deletar o lembrete.');
+      Alert.alert(t('reminders.errorTitle'), t('reminders.deleteFailed'));
       fetchReminders(true); // restaura caso a exclusão tenha falhado
       console.warn('[RemindersScreen] Erro ao deletar:', err);
     }
@@ -870,7 +901,7 @@ export default function RemindersScreen({ navigation }) {
       const syncData = await syncReminders();
       await scheduleFromSync(syncData);
     } catch (err) {
-      Alert.alert('Erro', 'Não foi possível atualizar o lembrete.');
+      Alert.alert(t('reminders.errorTitle'), t('reminders.updateFailed'));
       console.warn('[RemindersScreen] Erro ao atualizar:', err);
     }
   };
@@ -881,7 +912,7 @@ export default function RemindersScreen({ navigation }) {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView edges={['top']} style={styles.safe}>
         <View style={styles.centered}>
           <LoadingDog size={76} color={theme.primary} />
         </View>
@@ -891,11 +922,11 @@ export default function RemindersScreen({ navigation }) {
 
   if (error) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView edges={['top']} style={styles.safe}>
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => fetchReminders()}>
-            <Text style={styles.retryButtonText}>Tentar novamente</Text>
+            <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -908,7 +939,7 @@ export default function RemindersScreen({ navigation }) {
       g.items.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
     });
     if (grp.noDate.length > 0) {
-      sections.push({ type: 'header', id: `${prefix}-nodate`, title: 'Sem data', count: grp.noDate.length });
+      sections.push({ type: 'header', id: `${prefix}-nodate`, title: t('reminders.bucket.noDate'), count: grp.noDate.length });
       grp.noDate.forEach(r => sections.push({ type: 'item', id: r.id, reminder: r }));
     }
   };
@@ -918,7 +949,7 @@ export default function RemindersScreen({ navigation }) {
   pushBuckets(pontuaisGrp, 'p');
   // Vertente 2 — recorrentes, com o cabeçalho "Recorrentes" e os buckets próprios.
   if (recorrentes.length > 0) {
-    sections.push({ type: 'section', id: 'sec-recorrentes', title: 'Recorrentes', count: recorrentes.length });
+    sections.push({ type: 'section', id: 'sec-recorrentes', title: t('reminders.section.recurring'), count: recorrentes.length });
     pushBuckets(recorrentesGrp, 'r');
   }
 
@@ -928,9 +959,9 @@ export default function RemindersScreen({ navigation }) {
       style={[styles.swipePage, { opacity: entrance.opacity, transform: [...entrance.transform, { translateX: swipeTranslateX }] }]}
       {...panResponder.panHandlers}
     >
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView edges={['top']} style={{ flex: 1 }}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Meus Lembretes</Text>
+          <Text style={styles.headerTitle}>{t('reminders.title')}</Text>
           <PressableScale
             onPress={() => setMenuVisible(true)}
             hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}
@@ -943,7 +974,7 @@ export default function RemindersScreen({ navigation }) {
         <View style={styles.dateBlock}>
           <Text style={styles.todayDate}>{formatTodayLabel()}</Text>
           {reminders.length > 0 && (
-            <Text style={styles.editHint}>Clique para editar · segure para criar tarefa</Text>
+            <Text style={styles.editHint}>{t('reminders.editHint')}</Text>
           )}
         </View>
         <View style={styles.listWrap}>
@@ -997,8 +1028,8 @@ export default function RemindersScreen({ navigation }) {
             }}
             ListEmptyComponent={
               <View style={styles.centered}>
-                <Text style={styles.emptyText}>Nenhum lembrete criado ainda.</Text>
-                <Text style={styles.emptySubtext}>Peça ao chat para criar um!</Text>
+                <Text style={styles.emptyText}>{t('reminders.empty')}</Text>
+                <Text style={styles.emptySubtext}>{t('reminders.emptySubtext')}</Text>
               </View>
             }
           />
@@ -1013,9 +1044,9 @@ export default function RemindersScreen({ navigation }) {
         />
         <ConfirmDialog
           visible={!!deletingReminder}
-          title="Deletar lembrete"
-          message={deletingReminder ? `Deseja deletar "${deletingReminder.title}"?` : ''}
-          confirmText="Deletar"
+          title={t('reminders.deleteTitle')}
+          message={deletingReminder ? t('reminders.deleteMessage', { title: deletingReminder.title }) : ''}
+          confirmText={t('common.delete')}
           destructive
           onCancel={() => setDeletingReminder(null)}
           onConfirm={confirmDelete}

@@ -173,7 +173,7 @@ function makeStyles(theme) {
       borderBottomWidth: 1.5,
       borderColor: theme.primary,
       borderRadius: 4,
-      backgroundColor: theme.isDark ? 'rgba(255,130,52,0.08)' : 'rgba(255,130,52,0.06)',
+      backgroundColor: theme.isDark ? 'rgba(10,132,255,0.10)' : 'rgba(10,132,255,0.07)',
       zIndex: 1,
     },
     fadeTop: {
@@ -182,9 +182,8 @@ function makeStyles(theme) {
       left: 0,
       right: 0,
       height: ITEM_HEIGHT,
-      backgroundColor: theme.isDark
-        ? 'rgba(26,26,46,0.85)'
-        : 'rgba(240,242,245,0.85)',
+      backgroundColor: theme.surface2,
+      opacity: 0.85,
       zIndex: 2,
     },
     fadeBottom: {
@@ -193,9 +192,8 @@ function makeStyles(theme) {
       left: 0,
       right: 0,
       height: ITEM_HEIGHT,
-      backgroundColor: theme.isDark
-        ? 'rgba(26,26,46,0.85)'
-        : 'rgba(240,242,245,0.85)',
+      backgroundColor: theme.surface2,
+      opacity: 0.85,
       zIndex: 2,
     },
     colon: {

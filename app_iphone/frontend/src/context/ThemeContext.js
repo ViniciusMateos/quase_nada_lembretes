@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet } from 'react-native';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { MMKV } from 'react-native-mmkv';
 
 const themeStorage = new MMKV();
@@ -39,40 +39,100 @@ export const LIGHT_THEME = {
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
-  const fadeAnim = useRef(new Animated.Value(1)).current;
   const [isDark, setIsDark] = useState(() => {
     const saved = themeStorage.getString('theme');
     return saved !== 'light';
   });
 
+  // Cortina: uma View sólida por cima de tudo, na cor de fundo do tema de
+  // DESTINO, que sobe e desce numa SEQUÊNCIA CONTÍNUA.
+  //
+  // Duas versões anteriores, e por que falharam:
+  //
+  // 1. Baixar a opacidade da árvore toda pra 0.25 e trocar o tema 120ms depois:
+  //    a 0.25 você via a tela ANTIGA apagada (lê como piscada), e o re-render
+  //    pesado travava o JS no meio da animação de volta.
+  //
+  // 2. Cortina que subia até 1, ESPERAVA o setState + dois requestAnimationFrame,
+  //    e só então descia: esse tempo parado em opacidade 1 é uma tela sólida
+  //    branca ou preta — o "flash". Quanto mais pesado o re-render, maior o flash.
+  //
+  // Agora a cortina nunca PARA: sobe e desce de uma vez só, no driver nativo, e
+  // a troca de tema é disparada perto do pico. Como a animação roda no lado
+  // nativo, ela não espera nem trava com o re-render — o pico é um instante, não
+  // uma pausa.
+  const cover = useRef(new Animated.Value(0)).current;
+  const [coverColor, setCoverColor] = useState(DARK_THEME.background);
+  const animando = useRef(false);
+  const trocaRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(trocaRef.current), []);
+
   const toggleTheme = () => {
-    Animated.timing(fadeAnim, {
-      toValue: 0.25,
-      duration: 110,
-      useNativeDriver: true,
-    }).start();
-    setTimeout(() => {
-      setIsDark(prev => {
-        const next = !prev;
-        themeStorage.set('theme', next ? 'dark' : 'light');
-        return next;
-      });
-      Animated.timing(fadeAnim, {
+    if (animando.current) return; // toques repetidos não empilham animação
+    animando.current = true;
+
+    const next = !isDark;
+    setCoverColor((next ? DARK_THEME : LIGHT_THEME).background);
+    cover.setValue(0);
+
+    Animated.sequence([
+      Animated.timing(cover, {
         toValue: 1,
-        duration: 180,
+        duration: 220,
+        easing: Easing.in(Easing.quad),
         useNativeDriver: true,
-      }).start();
-    }, 120);
+      }),
+      Animated.timing(cover, {
+        toValue: 0,
+        duration: 340,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => { animando.current = false; });
+
+    // Troca perto do pico (a cortina está quase opaca) — o re-render acontece
+    // escondido, mas sem a animação ter que esperar por ele.
+    trocaRef.current = setTimeout(() => {
+      themeStorage.set('theme', next ? 'dark' : 'light');
+      setIsDark(next);
+    }, 190);
   };
 
   const theme = useMemo(() => (isDark ? DARK_THEME : LIGHT_THEME), [isDark]);
 
+  // A cortina sai no contexto porque um Modal (o menu hambúrguer, os sheets)
+  // renderiza numa JANELA NATIVA SEPARADA, acima da árvore do app: uma cortina
+  // desenhada aqui cobre a tela mas NÃO cobre o Modal. Sem isso, o fundo troca
+  // escondido e o menu troca depois, na cara do usuário. Quem abre Modal deve
+  // desenhar <ThemeCover /> dentro dele.
+  const value = useMemo(
+    () => ({ theme, isDark, toggleTheme, cover, coverColor }),
+    [theme, isDark, coverColor], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   return (
-    <ThemeContext.Provider value={{ theme, isDark, toggleTheme, fadeAnim }}>
-      <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+    <ThemeContext.Provider value={value}>
+      <View style={styles.root}>
         {children}
-      </Animated.View>
+        <ThemeCover />
+      </View>
     </ThemeContext.Provider>
+  );
+}
+
+/** Cortina do tema. Renderize dentro de todo Modal que possa estar aberto na troca. */
+export function ThemeCover() {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) return null;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        { backgroundColor: ctx.coverColor, opacity: ctx.cover },
+      ]}
+    />
   );
 }
 
