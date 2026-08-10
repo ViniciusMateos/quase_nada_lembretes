@@ -11,6 +11,29 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.6.0] - 2026-08-10
+
+### Added
+- **Notificações do chat dentro e fora do app**: qualquer resposta da IA (inclusive a pergunta de horário e a ambígua) avisa quando você não está vendo a conversa. Fora do app vira notificação real do iOS com som de "criado" (diferente do alarme de disparo); com o app aberto em outra tela, um **banner simulado** estilo iOS — desliza de cima, some sozinho, fecha no swipe pra cima e vai pro Chat ao tocar.
+- **Enviar e sair do app** na hora ainda cria o lembrete e dispara a notificação de "criado" de fora (reenvio na janela de graça do iOS ou pelo background-fetch), sem o falso erro de offline.
+- **Entrada do app sem piscar**: ao abrir por widget/notificação, um overlay (splash) segura até a tela-objetivo montar de fato; no launch normal o splash tem tempo mínimo e sai com fade.
+- **Recorrência por minutos** no intervalo (além de horas e dias).
+- **Versão OTA** no rodapé do menu ("OTA #N · atualizado/build") pra confirmar no device que o bundle novo baixou.
+- Tocar na **aba já ativa** rola a lista pro topo.
+- Widget de lista mostra **mais lembretes** (13 no grande, 5 no médio).
+
+### Fixed
+- Notificações locais não disparavam por causa do limite de 64 pendentes do iOS — agora agenda os 58 mais próximos por ordem de horário, e um re-sync em background cancela os "fantasmas" de lembretes desativados.
+- Sem mais o **som dobrado** quando o lembrete chega com o app aberto, nem o som atrasado ao voltar pro app.
+- Banner in-app aparece junto com o som, sem o atraso das chamadas de rede.
+
+### Changed
+- Enter no chat quebra linha; envio só pelo botão. Input do chat cresce animado a cada linha.
+- Menu hamburguer fecha ao arrastar da esquerda pra direita, com a tela de trás inativa a toques enquanto aberto.
+- Notificações separadas por tipo (lembrete/pré-aviso/ação/resumo) via thread do iOS.
+
+---
+
 ## [1.5.0] - 2026-07-16
 
 ### Added
