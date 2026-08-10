@@ -3,6 +3,7 @@ import {
   Animated,
   Image,
   Modal,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -12,9 +13,22 @@ import { ThemeCover, useTheme } from '../context/ThemeContext';
 import { useI18n } from '../i18n';
 import ChevronIcon from './ChevronIcon';
 import PressableScale from './PressableScale';
+import { OTA_VERSION } from '../constants/otaVersion';
 
 let BlurView = null;
 try { BlurView = require('expo-blur').BlurView; } catch (e) { BlurView = null; }
+
+// Se o bundle rodando veio de um `eas update` (OTA) ou do JS embutido no build.
+// Em dev client os Constants de update podem não existir — cai no fallback.
+let Updates = null;
+try { Updates = require('expo-updates'); } catch (e) { Updates = null; }
+function rodandoDeUpdate() {
+  try {
+    return Updates?.isEmbeddedLaunch === false; // false = veio de um OTA
+  } catch (e) {
+    return false;
+  }
+}
 
 export function HamburgerIcon() {
   return (
@@ -42,6 +56,27 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
     Animated.timing(slideAnim, { toValue: 340, duration: 200, useNativeDriver: true }).start(() => onClose());
   };
 
+  // O pan é criado uma vez (useRef); usa a versão mais recente de close via ref.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
+  // Arrastar o menu da esquerda pra direita fecha (empurra o drawer pra fora pela
+  // borda direita). Como o próprio drawer captura o gesto, a tela de trás não é
+  // tocada — junto com o Modal, garante que só o menu é interativo quando aberto.
+  const dragPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dx > 6 && Math.abs(g.dx) > Math.abs(g.dy) * 1.3,
+      onPanResponderMove: (_, g) => { slideAnim.setValue(Math.max(0, Math.min(g.dx, 340))); },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx > 90 || g.vx > 0.5) closeRef.current();
+        else Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
+      },
+    }),
+  ).current;
+
   const goToAccount = () => {
     close();
     setTimeout(() => navigation.navigate('Account'), 240);
@@ -60,7 +95,7 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} />
-        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
+        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]} {...dragPan.panHandlers}>
           {BlurView && <BlurView intensity={60} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, { backgroundColor: drawerBg }]} />
 
@@ -109,6 +144,16 @@ export default function HamburgerMenu({ visible, onClose, navigation }) {
             <Text style={[styles.cardText, { color: theme.textPrimary }]}>{t('common.account')}</Text>
             <ChevronIcon direction="right" color={theme.textSecondary} size={26} />
           </PressableScale>
+
+          {/* Rodapé: versão OTA rodando de fato no device. O número sobe a cada
+              `eas update`, então confirma que o bundle novo já baixou. */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+              OTA #{OTA_VERSION}
+              {'  ·  '}
+              {rodandoDeUpdate() ? t('chat.menu.otaUpdated') : t('chat.menu.otaEmbedded')}
+            </Text>
+          </View>
         </Animated.View>
 
         {/* Modal é uma janela nativa separada: a cortina do ThemeProvider não
@@ -159,6 +204,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardText: { fontSize: 16, fontWeight: '500', fontFamily: 'System' },
+  footer: {
+    marginTop: 'auto',
+    paddingTop: 16,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'System',
+    letterSpacing: 0.4,
+  },
   themeToggleTrack: {
     width: 58,
     height: 30,

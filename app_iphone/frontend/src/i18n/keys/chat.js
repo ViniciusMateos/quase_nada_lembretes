@@ -42,6 +42,8 @@ export default {
     'chat.menu.title': 'Configurações',
     'chat.menu.theme': 'Alterar tema',
     'chat.menu.notifications': 'Notificações',
+    'chat.menu.otaUpdated': 'atualizado',
+    'chat.menu.otaEmbedded': 'build',
   },
   en: {
     'chat.tab.tasks': 'Tasks',
@@ -83,5 +85,7 @@ export default {
     'chat.menu.title': 'Settings',
     'chat.menu.theme': 'Change theme',
     'chat.menu.notifications': 'Notifications',
+    'chat.menu.otaUpdated': 'updated',
+    'chat.menu.otaEmbedded': 'build',
   },
 };
