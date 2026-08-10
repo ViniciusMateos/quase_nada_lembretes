@@ -56,6 +56,7 @@ export default {
     'reminders.error.interval': 'Informe um intervalo válido',
 
     // Unidades do intervalo
+    'reminders.unit.minutes': 'minutos',
     'reminders.unit.hours': 'horas',
     'reminders.unit.days': 'dias',
 
@@ -169,6 +170,7 @@ export default {
     'reminders.error.interval': 'Enter a valid interval',
 
     // Unidades do intervalo
+    'reminders.unit.minutes': 'minutes',
     'reminders.unit.hours': 'hours',
     'reminders.unit.days': 'days',
 

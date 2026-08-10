@@ -80,6 +80,7 @@ const recurrenceTypes = () => [
 ];
 
 const intervalUnits = () => [
+  { key: 'minutes', label: t('reminders.unit.minutes') },
   { key: 'hours', label: t('reminders.unit.hours') },
   { key: 'days', label: t('reminders.unit.days') },
 ];
@@ -99,7 +100,8 @@ function intervalFromSeconds(seconds) {
   if (!seconds || seconds <= 0) return { value: '1', unit: 'days' };
   if (seconds % 86400 === 0) return { value: String(seconds / 86400), unit: 'days' };
   if (seconds % 3600 === 0) return { value: String(seconds / 3600), unit: 'hours' };
-  return { value: String(Math.max(1, Math.round(seconds / 3600))), unit: 'hours' };
+  if (seconds % 60 === 0) return { value: String(seconds / 60), unit: 'minutes' };
+  return { value: String(Math.max(1, Math.round(seconds / 60))), unit: 'minutes' };
 }
 
 // "Nenhum" / "1 aviso antes" / "N avisos antes".
@@ -264,7 +266,7 @@ export default function ReminderFormModal({ visible, reminder, onSave, onClose, 
     if (recurrence === 'interval_seconds') {
       const n = parseInt(intervalValue, 10);
       if (!n || n <= 0) newErrors.interval = t('reminders.error.interval');
-      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : 3600);
+      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : intervalUnit === 'hours' ? 3600 : 60);
     }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
