@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useTheme } from '../context/ThemeContext';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
+import { scrollToTop } from '../utils/scrollToTopBus';
 
 const H_PAD = 6;
 const GAP = 4;
@@ -132,6 +133,7 @@ export default function LiquidTabBar({ state, descriptors, navigation }) {
 
   const onTabPress = (route, focused) => {
     if (!focused) navigation.navigate(route.name); // squash vem pelo efeito do state.index
+    else scrollToTop(route.name); // tocou na aba já ativa → volta pro topo da lista
   };
 
   return (

@@ -15,6 +15,7 @@ import {
 // até o fim da tela e passar por trás do tab bar.
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { registerScrollToTop } from '../utils/scrollToTopBus';
 import useFocusEntrance from '../hooks/useFocusEntrance';
 import { listTasks, createTask, updateTask, deleteTask } from '../api/tasks.api';
 import { getWeekKey, formatTodayLabel } from '../utils/dateUtils';
@@ -61,6 +62,12 @@ export default function TasksScreen({ navigation }) {
   const [tasks, setTasks] = useState([]);
   const tasksRef = useRef([]);
   tasksRef.current = tasks;
+  const listaRef = useRef(null);
+
+  // Tocar na aba "Tarefas" já ativa → rola a lista pro topo.
+  useEffect(() => registerScrollToTop('Tarefas', () => {
+    listaRef.current?.scrollTo({ y: 0, animated: true });
+  }), []);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -320,6 +327,7 @@ export default function TasksScreen({ navigation }) {
                   </View>
                 )}
                 <ScrollView
+                  ref={listaRef}
                   scrollEnabled={!isDragging}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={[styles.listContent, { paddingBottom: tabClear }]}
