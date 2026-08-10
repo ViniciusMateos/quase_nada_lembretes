@@ -13,6 +13,8 @@ Além dos lembretes por IA, o app iOS tem uma aba de **Tarefas** semanais — co
 
 O app é **bilíngue (português / inglês)** — o idioma da interface é escolhido no menu, sem tocar no conteúdo do usuário nem no chat (a IA responde em português); o formato de hora (12h/24h) segue o aparelho, não o idioma. Traz também **widgets nativos** (atalho de criar lembrete, próximo lembrete na tela de bloqueio e a lista de próximos, em azul ou neutro) que leem os dados via App Group, e **notificações ricas** via extensão nativa (o resumo diário/semanal e o lembrete expandido com pré-avisos "me avise antes").
 
+Qualquer resposta do chat também **notifica quando você não está vendo a conversa**: fora do app vira notificação real do iOS; com o app aberto em outra tela, um **banner simulado** estilo iOS (desliza de cima, fecha no swipe, vai pro Chat ao tocar). Mandar um lembrete e sair do app na hora ainda envia e avisa, sem falso erro de offline. A recorrência por intervalo aceita **minutos** (além de horas e dias), e a abertura por widget/notificação segura o splash até a tela-objetivo carregar, sem piscar.
+
 ---
 
 ## Sumário
@@ -196,6 +198,7 @@ npx expo export --platform web --output-dir dist-web-qa
 - Quando entrar dependência nativa (ex.: `react-native-pager-view`), código Swift dos targets (widget/extensão) ou mudança de entitlement, é obrigatório gerar novo build iOS com `eas build`.
 - O `runtimeVersion` é **fixo** (`'1.0.0'` no `app.config.js`), desamarrado da `version`: dá pra bumpar a versão de marketing sem invalidar o OTA. **Só suba o `runtimeVersion` quando o código nativo mudar** — senão um app antigo baixaria um JS que espera um módulo que ele não tem.
 - Widgets e extensão de notificação vivem em `app_iphone/frontend/targets/` (via `@bacons/apple-targets`). A categoria da extensão fica no `targets/resumo-notif/Info.plist` escrito à mão — o plugin ignora o campo `infoPlist` do `expo-target.config.js`.
+- **Versão OTA:** incremente `OTA_VERSION` em `src/constants/otaVersion.js` a **cada** `eas update`. O número aparece no rodapé do menu ("OTA #N · atualizado/build") e confirma no device que o bundle novo baixou. Não confundir com `version` (marketing) nem com `runtimeVersion` (compatibilidade nativa).
 
 Após o build (~15 minutos), a Expo disponibilizará um link para download do arquivo `.ipa`. Instale no iPhone com [Sideloadly](https://sideloadly.io/) (Windows/Mac).
 
