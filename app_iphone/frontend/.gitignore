@@ -21,6 +21,8 @@ android/.gradle/
 
 # Expo
 .expo/
+# Artefato do `eas update` (bundle exportado) — não versionar
+dist/
 
 # Metro bundler
 .metro-health-check*
