@@ -25,17 +25,44 @@ export function onEditReminder(fn) {
   };
 }
 
-// Navega pra aba Lembretes e pede a edição do lembrete da notificação tocada.
+// Qual tela o toque numa notificação deve abrir (usado pra armar o gate de
+// cold-start com o alvo certo):
+//   'edit'      → notificação de um lembrete/pré-aviso/snooze (tem reminderId)
+//   'lembretes' → resumo diário/semanal (sem reminderId, abre a lista)
+//   null        → outros avisos, não navega
+export function coldStartTargetFromNotification(notification) {
+  const data = notification?.data || {};
+  if (data.reminderId) return 'edit';
+  if (typeof data.type === 'string' && data.type.startsWith('summary')) return 'lembretes';
+  return null;
+}
+
+// Navega a partir da notificação tocada. Lembrete único abre o modal de edição;
+// resumo diário/semanal abre a lista de Lembretes (não tem um reminder só).
 // Serve pros 3 cenários (foreground, background e cold start).
 export function openReminderEditFromNotification(notification) {
-  const rid = notification?.data?.reminderId;
-  if (!rid) return; // resumos e outros avisos não têm reminderId
+  const data = notification?.data || {};
+  const rid = data.reminderId;
+  const isResumo = typeof data.type === 'string' && data.type.startsWith('summary');
+  if (!rid && !isResumo) return; // outros avisos não navegam
   const go = () => {
     try {
       navigationRef.current?.navigate('Main', { screen: 'Lembretes' });
     } catch {}
-    setTimeout(() => requestEditReminder(rid), 400);
+    // requestEditReminder é pegajoso: se a tela ainda não montou (cold start),
+    // consome quando ela assinar. Sem delay fixo — abre no primeiro frame útil.
+    // Resumo não tem reminderId: só abrir a lista já é o objetivo.
+    if (rid) requestEditReminder(rid);
   };
+  // Espera adaptativa pela navegação em vez de um setTimeout fixo, pra abrir a
+  // tela o mais cedo possível quando o app foi aberto pela notificação.
   if (navigationRef.current?.isReady?.()) go();
-  else setTimeout(go, 600);
+  else {
+    let tentativas = 0;
+    const esperar = () => {
+      if (navigationRef.current?.isReady?.()) go();
+      else if (tentativas++ < 120) requestAnimationFrame(esperar);
+    };
+    requestAnimationFrame(esperar);
+  }
 }

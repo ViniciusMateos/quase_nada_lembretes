@@ -55,9 +55,10 @@ export default {
     plugins: [
       'expo-dev-client',
       'expo-av',
-      // Empacota o som de lembrete no bundle nativo (iOS e Android res/raw),
-      // para o Notifee tocar o som próprio em vez do padrão do sistema.
-      ['expo-notifications', { sounds: ['./assets/sound-reminder.wav'] }],
+      // Empacota os sons no bundle nativo (iOS e Android res/raw) pro Notifee
+      // tocar som próprio: sound-reminder = lembrete disparando (alarme);
+      // sound-receive = lembrete criado / mensagem do chat (mais suave).
+      ['expo-notifications', { sounds: ['./assets/sound-reminder.wav', './assets/sound-receive.wav'] }],
       // SDK 54 pediu o plugin explícito do datetimepicker.
       '@react-native-community/datetimepicker',
       // Targets nativos iOS (widget de tela de bloqueio + UI custom da

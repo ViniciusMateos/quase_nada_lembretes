@@ -17,6 +17,11 @@ export const ACTION_SNOOZE_10 = 'snooze_10';
 const IOS_SOUND = 'sound-reminder.wav';
 const ANDROID_SOUND = 'sound_reminder';
 
+// Som de "lembrete criado / mensagem do chat" — diferente do alarme de quando o
+// lembrete dispara. Empacotado só a partir do próximo build; até lá o iOS cai no
+// som padrão (que já é diferente do alarme). O de disparo continua o IOS_SOUND.
+const SOUND_CREATED = { ios: 'sound-receive.wav', android: 'sound_receive' };
+
 const SNOOZE_PREFIX = 'snooze_';
 
 // No banner do iOS o TÍTULO é bold e o CORPO é regular — e não há como estilizar
@@ -149,7 +154,18 @@ export async function cancelAllNotifications() {
   }
 }
 
-function buildNotification(id, title, body) {
+// Grupos de notificação (thread). O iOS empilha por threadId e o Android por
+// groupId, então cada tipo vira um amontoado separado na central em vez de tudo
+// misturado: lembretes reais, pré-avisos ("me avise antes"), ações do chat
+// (criou/editou/removeu) e os resumos diário/semanal.
+export const THREAD = {
+  LEMBRETE: 'lembrete',
+  PRE: 'pre',
+  ACAO: 'acao',
+  RESUMO: 'resumo',
+};
+
+function buildNotification(id, title, body, threadId = THREAD.LEMBRETE) {
   const priority = getPriorityEnabled();
   return {
     id,
@@ -162,6 +178,7 @@ function buildNotification(id, title, body) {
       sound: androidSound(),
       importance: AndroidImportance.HIGH,
       vibrationPattern: [100, 200, 100, 200],
+      groupId: threadId,
       actions: [
         { title: t('notifications.snooze.5'), pressAction: { id: ACTION_SNOOZE_5 } },
         { title: t('notifications.snooze.10'), pressAction: { id: ACTION_SNOOZE_10 } },
@@ -170,6 +187,7 @@ function buildNotification(id, title, body) {
     ios: {
       sound: iosSound(),
       categoryId: CATEGORY_ID,
+      threadId,
       // timeSensitive fura modos de Foco; 'active' é o nível normal.
       interruptionLevel: priority ? 'timeSensitive' : 'active',
       // Sem isso, iOS suprime o banner quando o app está em foreground.
@@ -207,17 +225,20 @@ function anteced(leadSeconds) {
   return t(m === 1 ? 'notifications.in.minute' : 'notifications.in.minutes', { n: m });
 }
 
-// Pré-aviso não é o lembrete: não toca a ação de adiar (não há o que adiar
-// ainda) e diz explicitamente quanto falta e pra que horas é o disparo.
-async function schedulePreNotification(reminder, pre, now) {
+// Monta (sem agendar) o notif de um pré-aviso. Pré-aviso não é o lembrete: não
+// toca a ação de adiar (não há o que adiar ainda) e diz quanto falta e a que
+// horas é o disparo. Retorna { ts, notif } pro balde central, ou null se já
+// passou. Quem agenda é o scheduleFromSync (com o corte do limite do iOS).
+function buildPreNotif(reminder, pre, now) {
   const ts = new Date(pre.at).getTime();
-  if (ts <= now) return;
+  if (ts <= now) return null;
 
   const alvo = new Date(pre.target);
   const notif = buildNotification(
     `${reminder.id}_pre_${ts}`,
     t('notifications.pre.title', { titulo: reminder.title }),
     t('notifications.pre.body', { quando: anteced(pre.lead_seconds), hora: hmBRT(alvo) }),
+    THREAD.PRE,
   );
   delete notif.android.actions;
   delete notif.ios.categoryId;
@@ -228,10 +249,7 @@ async function schedulePreNotification(reminder, pre, now) {
     type: 'pre',
   };
 
-  await notifee.createTriggerNotification(notif, {
-    type: TriggerType.TIMESTAMP,
-    timestamp: ts,
-  });
+  return { ts, notif };
 }
 
 // App Group compartilhado com os widgets (mesmo id do app.config.js / target).
@@ -282,12 +300,17 @@ async function gravarLembretesParaWidget(syncData, now) {
     }
     itens.sort((a, b) => a.timestamp - b.timestamp);
     // O ExtensionStorage aceita string; guardamos o JSON (o Swift decodifica).
-    widgetStore.set('proximos_lembretes', JSON.stringify(itens.slice(0, 12)));
+    // Guarda o suficiente pro widget grande (13 linhas) com folga.
+    widgetStore.set('proximos_lembretes', JSON.stringify(itens.slice(0, 16)));
     ExtensionStorage.reloadWidget(); // redesenha os widgets já na tela
   } catch (error) {
     console.warn('[Notifications] Erro ao gravar lembretes do widget:', error);
   }
 }
+
+// O iOS mantém no máximo 64 notificações locais PENDENTES por app e descarta,
+// sem avisar, tudo que passar disso. Deixamos folga pros "adiar" one-off.
+const LIMITE_PENDENTES = 58;
 
 export async function scheduleFromSync(syncData) {
   try {
@@ -298,23 +321,28 @@ export async function scheduleFromSync(syncData) {
 
     const now = Date.now();
 
+    // Junta TODAS as notificações candidatas (pré-avisos, disparos e resumos)
+    // num balde único com seu horário, ordena por horário e agenda só as mais
+    // PRÓXIMAS. Antes o loop agendava em ordem de lembrete — quando batia o
+    // limite do iOS, o que vinha depois (pré-avisos e resumos de lembretes mais
+    // adiante no loop) sumia, mesmo disparando antes. Ordenando por tempo, as
+    // iminentes sempre entram.
+    const candidatos = [];
+
     for (const reminder of syncData.reminders) {
       if (!reminder.is_active) continue;
 
       for (const pre of reminder.pre_executions || []) {
-        await schedulePreNotification(reminder, pre, now);
+        const c = buildPreNotif(reminder, pre, now);
+        if (c) candidatos.push(c);
       }
 
-      if (!reminder.scheduled_executions?.length) continue;
-
       const isRecurring = !!reminder.recurrence && reminder.recurrence !== 'once';
-
-      for (const executionISO of reminder.scheduled_executions) {
-        const triggerTimestamp = new Date(executionISO).getTime();
-        if (triggerTimestamp <= now) continue;
-
+      for (const executionISO of reminder.scheduled_executions || []) {
+        const ts = new Date(executionISO).getTime();
+        if (ts <= now) continue;
         const notif = buildNotification(
-          `${reminder.id}_${triggerTimestamp}`,
+          `${reminder.id}_${ts}`,
           tituloLembrete(reminder.title),
           t('notifications.snoozeHint'),
         );
@@ -323,15 +351,27 @@ export async function scheduleFromSync(syncData) {
           title: reminder.title,
           isRecurring: isRecurring ? '1' : '0',
         };
-
-        await notifee.createTriggerNotification(notif, {
-          type: TriggerType.TIMESTAMP,
-          timestamp: triggerTimestamp,
-        });
+        candidatos.push({ ts, notif });
       }
     }
 
-    await scheduleSummaryNotifications(syncData);
+    // Resumos entram no mesmo balde (também ocupam slot do iOS).
+    coletarResumos(syncData, now, candidatos);
+
+    candidatos.sort((a, b) => a.ts - b.ts);
+    const agendar = candidatos.slice(0, LIMITE_PENDENTES);
+    for (const c of agendar) {
+      await notifee.createTriggerNotification(c.notif, {
+        type: TriggerType.TIMESTAMP,
+        timestamp: c.ts,
+      });
+    }
+    if (candidatos.length > LIMITE_PENDENTES) {
+      console.warn(
+        `[Notifications] ${candidatos.length} candidatas; agendadas as ${LIMITE_PENDENTES} mais próximas (limite do iOS). As demais entram no próximo sync.`,
+      );
+    }
+
     await gravarLembretesParaWidget(syncData, now);
   } catch (error) {
     console.warn('[Notifications] Erro ao sincronizar notificações:', error);
@@ -343,11 +383,9 @@ export async function scheduleFromSync(syncData) {
 //   ("você tem N lembretes para amanhã: ...").
 // - SEMANAL: toda segunda 8h, o total da semana.
 // Recriadas a cada sync (ids determinísticos), então não duplicam.
-async function scheduleSummaryNotifications(syncData) {
-  const now = Date.now();
-  // TESTE: dispara os resumos em segundos em vez dos horários reais (12h dia
-  // anterior / segunda 8h). TROCAR PRA false depois de testar.
-  const SUMMARY_TEST = false;
+// Junta os resumos (diário/semanal) no `candidatos`, em vez de agendar direto —
+// assim eles competem pelos slots do iOS junto com os lembretes, por horário.
+function coletarResumos(syncData, now, candidatos) {
   const byDay = {}; // dayKey(BRT) -> [titles]
 
   for (const reminder of syncData.reminders) {
@@ -363,14 +401,14 @@ async function scheduleSummaryNotifications(syncData) {
 
   const dayKeys = Object.keys(byDay).sort();
 
-  const emit = async (id, title, body, data, timestamp) => {
-    const notif = buildNotification(id, title, body);
+  const emit = (id, title, body, data, timestamp) => {
+    const notif = buildNotification(id, title, body, THREAD.RESUMO);
     delete notif.android.actions; // resumo não tem "adiar"
     // Categoria própria do resumo — casa com a Notification Content Extension
-    // (targets/resumo-notif) quando ela for buildada; sem ela, mostra o padrão.
+    // (targets/resumo-notif); sem ela, mostra o padrão.
     notif.ios.categoryId = 'resumo';
     notif.data = data;
-    await notifee.createTriggerNotification(notif, { type: TriggerType.TIMESTAMP, timestamp });
+    candidatos.push({ ts: timestamp, notif });
   };
 
   // Corpo listando cada lembrete (nome + horário) — cada um numa linha, pra
@@ -416,13 +454,13 @@ async function scheduleSummaryNotifications(syncData) {
 
   // Diária — 12h do dia anterior a cada dia com lembretes.
   for (const dayKey of dayKeys) {
-    const fireTs = SUMMARY_TEST ? now + 12000 : brtTimestamp(prevDayKey(dayKey), DAILY_SUMMARY_HOUR);
-    if (!SUMMARY_TEST && fireTs <= now) continue; // aviso das 12h de ontem já passou
+    const fireTs = brtTimestamp(prevDayKey(dayKey), DAILY_SUMMARY_HOUR);
+    if (fireTs <= now) continue; // aviso das 12h de ontem já passou
     const items = byDay[dayKey].slice().sort((a, b) => a.ts - b.ts);
     const n = items.length;
     const cabecalho = t(n === 1 ? 'notifications.summary.daily' : 'notifications.summary.dailyPlural', { n });
     const body = `${cabecalho}\n${listar(items, false)}`;
-    await emit(`${SUMMARY_PREFIX}daily_${dayKey}`, t('notifications.summary.dailyTitle'), body, { type: 'summary_daily', dayKey }, fireTs);
+    emit(`${SUMMARY_PREFIX}daily_${dayKey}`, t('notifications.summary.dailyTitle'), body, { type: 'summary_daily', dayKey }, fireTs);
   }
 
   // Semanal — segunda 8h, todos os lembretes da semana (seg..dom).
@@ -432,13 +470,13 @@ async function scheduleSummaryNotifications(syncData) {
     (byWeek[mk] = byWeek[mk] || []).push(...byDay[dayKey]);
   }
   for (const mondayKey of Object.keys(byWeek).sort()) {
-    const fireTs = SUMMARY_TEST ? now + 30000 : brtTimestamp(mondayKey, WEEKLY_SUMMARY_HOUR);
-    if (!SUMMARY_TEST && fireTs <= now) continue;
+    const fireTs = brtTimestamp(mondayKey, WEEKLY_SUMMARY_HOUR);
+    if (fireTs <= now) continue;
     const items = byWeek[mondayKey].slice().sort((a, b) => a.ts - b.ts);
     const n = items.length;
     const cabecalho = t(n === 1 ? 'notifications.summary.weekly' : 'notifications.summary.weeklyPlural', { n });
     const body = `${cabecalho}\n${listar(items, true)}`;
-    await emit(`${SUMMARY_PREFIX}weekly_${mondayKey}`, t('notifications.summary.weeklyTitle'), body, { type: 'summary_weekly', mondayKey }, fireTs);
+    emit(`${SUMMARY_PREFIX}weekly_${mondayKey}`, t('notifications.summary.weeklyTitle'), body, { type: 'summary_weekly', mondayKey }, fireTs);
   }
 }
 
@@ -519,13 +557,19 @@ export async function handleNotificationEvent({ type, detail }) {
 // Notificação local imediata (ex.: "Lembrete registrado" quando processado em background,
 // ou confirmações do chat). `silent: true` derruba o som de sistema — usar quando o app
 // já está tocando o som de "received" pela tela.
-export async function displayLocalNotification(title, body, { silent = false } = {}) {
+export async function displayLocalNotification(title, body, { silent = false, sound } = {}) {
   try {
     await ensureChannel();
-    const notif = buildNotification(`local_${Date.now()}`, title, body);
+    // Aviso informativo (criou/editou/removeu lembrete pelo chat) → grupo próprio.
+    const notif = buildNotification(`local_${Date.now()}`, title, body, THREAD.ACAO);
     // remove ações de adiar nesse aviso informativo
     delete notif.android.actions;
     delete notif.ios.categoryId;
+    if (sound) {
+      // Som específico (ex.: som de "criado", diferente do alarme de disparo).
+      notif.ios.sound = sound.ios;
+      notif.android.sound = sound.android;
+    }
     if (silent) {
       delete notif.android.sound;
       delete notif.ios.sound;
@@ -535,4 +579,46 @@ export async function displayLocalNotification(title, body, { silent = false } =
   } catch (error) {
     console.warn('[Notifications] Erro ao exibir notificação local:', error);
   }
+}
+
+// Notificação de "lembrete criado/atualizado/removido" — MESMO texto que o banner
+// interno do chat. Serve pra disparar de fora do app (fila offline / background)
+// quando a mensagem foi processada sem o usuário estar olhando a tela.
+const ACTION_TITLE_KEY = {
+  reminder_created: 'chat.banner.created',
+  reminder_updated: 'chat.banner.updated',
+  reminder_deleted: 'chat.banner.deleted',
+};
+
+// Texto (título + corpo) da ação de lembrete — fonte única usada tanto pela
+// notificação real (fora do app) quanto pelo banner simulado (dentro do app).
+export function reminderActionText(actionType, action) {
+  const key = ACTION_TITLE_KEY[actionType];
+  if (!key) return null;
+  const body = action?.reminder?.title || action?.reminder_title || t('chat.banner.fallback');
+  return { title: t(key), body };
+}
+
+// Texto pra QUALQUER resposta do chat: ação de lembrete tem título próprio;
+// as demais (pergunta de horário, ambígua, resposta comum) viram uma notificação
+// de "nova mensagem" com o texto da IA. Retorna null se não há o que notificar.
+export function chatResponseText(actionType, action, response) {
+  const acao = reminderActionText(actionType, action);
+  if (acao) return acao;
+  const body = String(response || '').split('\n')[0].trim();
+  if (!body) return null;
+  return { title: t('notifications.chatMessageTitle'), body };
+}
+
+// Notificação real (fora do app) de mensagem/ação do chat — com o som de "criado"
+// (suave), diferente do alarme de quando o lembrete dispara.
+export async function notifyChatBanner(title, body) {
+  await displayLocalNotification(title, body, { sound: SOUND_CREATED });
+}
+
+export async function notifyReminderAction(actionType, action) {
+  const txt = reminderActionText(actionType, action);
+  if (!txt) return false;
+  await notifyChatBanner(txt.title, txt.body);
+  return true;
 }

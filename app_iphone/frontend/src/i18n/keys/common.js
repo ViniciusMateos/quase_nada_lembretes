@@ -20,6 +20,8 @@ export default {
     'common.language': 'Idioma',
     'common.theme': 'Tema',
     'common.account': 'Conta',
+    'common.appShortName': 'Lembretes',
+    'common.now': 'agora',
 
     'day.mon': 'Seg', 'day.tue': 'Ter', 'day.wed': 'Qua',
     'day.thu': 'Qui', 'day.fri': 'Sex', 'day.sat': 'Sáb', 'day.sun': 'Dom',
@@ -44,6 +46,8 @@ export default {
     'common.language': 'Language',
     'common.theme': 'Theme',
     'common.account': 'Account',
+    'common.appShortName': 'Reminders',
+    'common.now': 'now',
 
     'day.mon': 'Mon', 'day.tue': 'Tue', 'day.wed': 'Wed',
     'day.thu': 'Thu', 'day.fri': 'Fri', 'day.sat': 'Sat', 'day.sun': 'Sun',

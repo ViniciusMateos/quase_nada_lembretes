@@ -20,12 +20,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
 import { sendMessage } from '../api/messages.api';
 import { deleteReminder, syncReminders, listReminders } from '../api/reminders.api';
-import { requestPermission, scheduleFromSync, displayLocalNotification } from '../services/notifications';
+import { requestPermission, scheduleFromSync, notifyChatBanner, chatResponseText } from '../services/notifications';
 import { enqueueMessage, drainQueue } from '../services/messageQueue';
+import { showInAppBanner } from '../utils/inAppBanner';
+import { navigationRef } from '../api/client';
 import { detectIs12h } from '../utils/timeFormat';
 import { formatTodayLabel } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
 import { onCompose } from '../utils/composeIntent';
+import { getColdStartTarget, markColdStartReady } from '../utils/coldStartGate';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../i18n';
@@ -40,6 +43,10 @@ import useFocusEntrance from '../hooks/useFocusEntrance';
 import { playReceiveSound, playSendSound, playMessageSound, playErrorSound, preloadSounds } from '../services/sounds';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+
+const INPUT_MIN_H = 44;
+const INPUT_MAX_H = 120;
 
 // Recebe `t` por parâmetro: se resolvesse as strings no import, a saudação ficaria
 // congelada no idioma inicial.
@@ -57,23 +64,20 @@ function generateId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// Idem: mapa vira função pra resolver o título no momento do disparo.
-const bannerTitleKey = {
-  reminder_created: 'chat.banner.created',
-  reminder_updated: 'chat.banner.updated',
-  reminder_deleted: 'chat.banner.deleted',
-};
-
-function showReminderActionBanner(t, actionType, action) {
-  // Só notifica se o app NÃO está aberto na frente. Com o usuário dentro do app,
-  // ele já vê o resultado na tela — a notificação de "lembrete criado" só polui.
-  // O feedback dentro do app é o som de resposta do chat, que toca à parte.
-  if (AppState.currentState === 'active') return;
-
-  const key = bannerTitleKey[actionType];
-  if (!key) return;
-  const body = action?.reminder?.title || action?.reminder_title || t('chat.banner.fallback');
-  displayLocalNotification(t(key), body, { silent: true });
+// Roteia a notificação de QUALQUER resposta do chat (ação de lembrete OU mensagem
+// comum, como a pergunta de horário). `txt` = { title, body } ou null.
+function routeChatNotification(txt) {
+  if (!txt || (!txt.title && !txt.body)) return;
+  // App em background → notificação de verdade do iOS (com o som de criado/mensagem).
+  if (AppState.currentState !== 'active') {
+    notifyChatBanner(txt.title, txt.body);
+    return;
+  }
+  // App em foreground: o iOS não mostra notificação. Se o usuário está na tela de
+  // Chat, ele já vê a resposta ali (nada a fazer). Se saiu pra outra aba, mostra a
+  // notificação SIMULADA in-app (mesma pegada da real).
+  const rota = navigationRef.current?.getCurrentRoute?.()?.name;
+  if (rota && rota !== 'Chat') showInAppBanner(txt);
 }
 
 export default function ChatScreen({ navigation }) {
@@ -90,6 +94,19 @@ export default function ChatScreen({ navigation }) {
   const sendFlyAnim = useRef(new Animated.Value(0)).current;
   const sendButtonAnim = useRef(new Animated.Value(0)).current;
   const inputMargin = useRef(new Animated.Value(68)).current;
+  // Altura do input do chat, animada a cada quebra de linha em vez de dar um
+  // "pulo" seco quando o texto passa pra próxima linha.
+  const inputHeight = useRef(new Animated.Value(INPUT_MIN_H)).current;
+  const onInputContentSize = e => {
+    // contentSize.height já inclui o padding vertical do input — não somar de novo.
+    const alvo = Math.min(INPUT_MAX_H, Math.max(INPUT_MIN_H, e.nativeEvent.contentSize.height));
+    Animated.timing(inputHeight, {
+      toValue: alvo,
+      duration: 120,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false, // height é layout
+    }).start();
+  };
   const screenWidth = Dimensions.get('window').width;
   const insets = useSafeAreaInsets();
 
@@ -164,10 +181,28 @@ export default function ChatScreen({ navigation }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const canSend = inputText.trim().length > 0 && !isLoading;
 
-  // Deep link / widget "clique para ser lembrado" → foca o input (abre teclado).
+  // Widget "Criar lembrete" → foca o input (abre o teclado). Tenta focar já no
+  // próximo frame; se o input ainda não montou (cold start), re-tenta por alguns
+  // frames em vez de esperar um delay fixo. Abre o mais cedo que o iOS permitir.
   useEffect(() => onCompose(() => {
-    setTimeout(() => inputRef.current?.focus(), 150);
+    let tentativas = 0;
+    const focar = () => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        // Objetivo do cold-start atingido (teclado abrindo) → libera o overlay.
+        markColdStartReady('compose');
+      } else if (tentativas++ < 30) requestAnimationFrame(focar);
+    };
+    requestAnimationFrame(focar);
   }), []);
+
+  // Widget "Próximo lembrete" (://chat, sem teclado): o alvo é só ter a Chat
+  // visível. Assim que ela monta, libera o overlay do cold-start.
+  useEffect(() => {
+    if (getColdStartTarget() === 'chat') {
+      requestAnimationFrame(() => markColdStartReady('chat'));
+    }
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -266,9 +301,10 @@ export default function ChatScreen({ navigation }) {
         action: result.action || null,
       });
       const tipo = result.action?.type;
+      // Notifica antes do await de sync pra o banner não aparecer atrasado.
+      routeChatNotification(chatResponseText(tipo, result.action, result.response));
       if (tipo === 'reminder_created' || tipo === 'reminder_updated' || tipo === 'reminder_deleted') {
         await handleSync();
-        showReminderActionBanner(t, tipo, result.action);
       }
     });
   }, [addMessage, handleSync, t]);
@@ -281,11 +317,13 @@ export default function ChatScreen({ navigation }) {
     return () => unsubscribe();
   }, [drainOfflineQueue]);
 
-  // Também tenta esvaziar a fila quando o app volta pro foreground: cobre o caso
-  // em que o NetInfo não disparou (rede já estava ativa) mas a fila não rodou.
+  // Esvazia a fila quando o app volta pro foreground (caso o NetInfo não tenha
+  // disparado) E também quando o app VAI pro background: se ficou algo na fila,
+  // aproveita a janela de graça do iOS pra mandar e disparar a notificação de
+  // "lembrete criado" de fora, sem esperar o background-fetch (que é agendado).
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') drainOfflineQueue();
+      if (state === 'active' || state === 'background') drainOfflineQueue();
     });
     return () => sub.remove();
   }, [drainOfflineQueue]);
@@ -386,9 +424,19 @@ export default function ChatScreen({ navigation }) {
         action: result.action || null,
       };
       addMessage(aiMessage);
-      playReceiveSound();
+      // Som só com o app ativo. Se a resposta chegou com o app em background (você
+      // enviou e saiu na hora), o expo-av não toca em background e o som ficaria
+      // "preso" pra estourar quando você voltasse — o delay chato. Nesse caso quem
+      // avisa é a notificação (som próprio), então aqui a gente não toca.
+      if (AppState.currentState === 'active') playReceiveSound();
 
       const actionType = result.action?.type;
+
+      // Notifica JÁ, junto com o som — antes dos awaits de sync/confirm abaixo, que
+      // são chamadas de rede e faziam o banner aparecer atrasado (som primeiro, só
+      // depois a notificação). O texto vem do result, não depende do sync.
+      routeChatNotification(chatResponseText(actionType, result.action, result.response));
+
       // Qualquer mudança no conjunto de lembretes precisa re-sincronizar as
       // notificações locais. 'reminder_updated' estava de fora → ao editar pelo
       // chat, as notificações antigas não eram canceladas e o horário antigo
@@ -399,7 +447,6 @@ export default function ChatScreen({ navigation }) {
         actionType === 'reminder_deleted'
       ) {
         await handleSync();
-        showReminderActionBanner(t, actionType, result.action);
         if (actionType === 'reminder_created') {
           await confirmReminderCreated(result.action.reminder);
         }
@@ -415,21 +462,31 @@ export default function ChatScreen({ navigation }) {
       const isNetworkError = !error?.response;
 
       if (isNetworkError) {
-        // Sem conexão / queda no meio da requisição → enfileira para reenviar
-        // automaticamente quando a internet voltar.
+        // Sem conexão / queda no meio da requisição → enfileira para reenviar.
         enqueueMessage({
           content,
           client_timestamp: userMessage.timestamp,
           hour_format: detectIs12h() ? '12h' : '24h',
         });
-        addMessage({
-          id: generateId(),
-          role: 'assistant',
-          content: t('chat.error.offline'),
-          timestamp: new Date().toISOString(),
-          action: null,
-          isError: true,
-        });
+
+        // Se a falha foi porque o usuário SAIU do app (a requisição em voo morre
+        // ao ir pro background), não é offline de verdade: tenta reenviar já, na
+        // janela de graça que o iOS dá na transição — o reenvio dispara a
+        // notificação de "lembrete criado" de fora. Se não der, o background-fetch
+        // pega a fila depois. E não mostramos o erro vermelho de offline (que
+        // ficaria mentindo no chat quando o usuário voltasse).
+        if (AppState.currentState !== 'active') {
+          drainOfflineQueue();
+        } else {
+          addMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: t('chat.error.offline'),
+            timestamp: new Date().toISOString(),
+            action: null,
+            isError: true,
+          });
+        }
       } else {
         const errCode = error?.code?.toUpperCase() || '';
         const errStatus = error?.response?.status;
@@ -559,18 +616,21 @@ export default function ChatScreen({ navigation }) {
         ) : null}
 
         <View style={styles.inputContainer}>
-          <TextInput
+          <AnimatedTextInput
             ref={inputRef}
-            style={[styles.textInput, inputFocused && styles.textInputFocused]}
+            style={[styles.textInput, inputFocused && styles.textInputFocused, { height: inputHeight }]}
             placeholder={t('chat.inputPlaceholder')}
             placeholderTextColor={theme.textPlaceholder}
             value={inputText}
             onChangeText={setInputText}
+            onContentSizeChange={onInputContentSize}
             multiline
             maxLength={1000}
-            returnKeyType="send"
-            enablesReturnKeyAutomatically
-            onSubmitEditing={() => handleSend()}
+            // Enter quebra linha normal; envio só pelo botão ao lado. Antes o
+            // returnKeyType="send" + onSubmitEditing mostrava "enviar" no teclado,
+            // mas como o campo é multiline o Enter quebrava linha — confuso.
+            returnKeyType="default"
+            blurOnSubmit={false}
             onFocus={() => { isInputFocusedRef.current = true; setInputFocused(true); }}
             onBlur={() => { isInputFocusedRef.current = false; setInputFocused(false); }}
             contextMenuHidden={false}

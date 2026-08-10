@@ -21,6 +21,7 @@ export default {
 
     'notifications.recurring': 'Recorrentes:',
     'notifications.andMore': '…e mais {n}',
+    'notifications.chatMessageTitle': 'Nova mensagem',
 
     'notifications.summary.dailyTitle': 'Lembretes de amanhã',
     'notifications.summary.weeklyTitle': 'Lembretes da semana',
@@ -55,6 +56,7 @@ export default {
 
     'notifications.recurring': 'Recurring:',
     'notifications.andMore': '…and {n} more',
+    'notifications.chatMessageTitle': 'New message',
 
     'notifications.summary.dailyTitle': "Tomorrow's reminders",
     'notifications.summary.weeklyTitle': "This week's reminders",

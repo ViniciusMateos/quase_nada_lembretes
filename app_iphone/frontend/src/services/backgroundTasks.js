@@ -11,19 +11,41 @@
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import { drainQueue } from './messageQueue';
-import { displayLocalNotification } from './notifications';
+import { displayLocalNotification, notifyReminderAction, scheduleFromSync } from './notifications';
+import { syncReminders } from '../api/reminders.api';
 
 export const BACKGROUND_QUEUE_TASK = 'background-message-queue';
+
+// Re-sincroniza as notificações em segundo plano. É isto que CANCELA os
+// "fantasmas": notificações de lembretes que foram desativados/deletados mas
+// cujo agendamento no iOS sobrevive na fila até um sync rodar. Sem abrir o app,
+// só o background consegue limpar. Best-effort — o iOS decide quando roda e
+// nunca roda com o app forçadamente encerrado; cobertura total exigiria push.
+async function resyncEmBackground() {
+  try {
+    const syncData = await syncReminders();
+    await scheduleFromSync(syncData); // cancela os pendentes e reagenda só os ativos
+    return true;
+  } catch {
+    return false; // deslogado/offline: o próximo foreground resolve
+  }
+}
 
 TaskManager.defineTask(BACKGROUND_QUEUE_TASK, async () => {
   try {
     const sent = await drainQueue(async (item, result) => {
-      const body = result?.response
-        ? String(result.response).split('\n')[0]
-        : 'Lembrete registrado';
-      await displayLocalNotification('Lembrete registrado', body);
+      // Mesma notificação de "lembrete criado/atualizado/removido" que apareceria
+      // dentro do app — só que disparada de fora, já que foi processado em background.
+      const tipo = result?.action?.type;
+      const notificou = await notifyReminderAction(tipo, result?.action);
+      // Se não foi uma ação de lembrete (ex.: resposta comum da IA), avisa genérico.
+      if (!notificou) {
+        const body = result?.response ? String(result.response).split('\n')[0] : 'Lembrete registrado';
+        await displayLocalNotification('Lembrete registrado', body);
+      }
     });
-    return sent > 0
+    const resynced = await resyncEmBackground();
+    return sent > 0 || resynced
       ? BackgroundFetch.BackgroundFetchResult.NewData
       : BackgroundFetch.BackgroundFetchResult.NoData;
   } catch {
