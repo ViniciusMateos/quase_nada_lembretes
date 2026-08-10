@@ -195,7 +195,8 @@ struct ListaView: View {
   let neutro: Bool
   @Environment(\.widgetFamily) var family
 
-  private var maxLinhas: Int { family == .systemLarge ? 8 : 3 }
+  // Ajustado ao espaço real: o grande cabe bem mais que 8, o médio mais que 3.
+  private var maxLinhas: Int { family == .systemLarge ? 13 : 5 }
 
   var body: some View {
     let itens = Array(entry.itens.prefix(maxLinhas))
