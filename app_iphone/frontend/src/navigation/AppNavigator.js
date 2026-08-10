@@ -1,4 +1,5 @@
-import { View, StyleSheet, Image, useWindowDimensions } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, Image, Animated, Easing, useWindowDimensions } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
@@ -118,17 +119,55 @@ function AppStack() {
   );
 }
 
+// Tempo mínimo que o splash fica na tela, mesmo se o auth resolver antes. Sem
+// isso o app carrega tão rápido que o splash só "pisca". Um tempinho girando +
+// fade de saída deixa a entrada suave em vez de um corte seco.
+const SPLASH_MIN_MS = 600;
+
 export default function AppNavigator() {
   const { isLoading, isAuthenticated } = useAuth();
+  const [tempoMinimo, setTempoMinimo] = useState(false);
+  const [splashMontado, setSplashMontado] = useState(true);
+  const fade = useRef(new Animated.Value(1)).current;
 
-  if (isLoading) {
-    return <SplashScreen />;
-  }
+  useEffect(() => {
+    const t = setTimeout(() => setTempoMinimo(true), SPLASH_MIN_MS);
+    return () => clearTimeout(t);
+  }, []);
 
-  return isAuthenticated ? <AppStack /> : <AuthStack />;
+  // Pronto quando o auth resolveu E o tempo mínimo passou. Aí desvanece e desmonta.
+  const pronto = !isLoading && tempoMinimo;
+  useEffect(() => {
+    if (!pronto) return;
+    Animated.timing(fade, {
+      toValue: 0,
+      duration: 300,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(() => setSplashMontado(false));
+  }, [pronto, fade]);
+
+  return (
+    <View style={styles.fill}>
+      {/* Conteúdo já monta assim que o auth resolve — o splash fica POR CIMA
+          (opaco) e some com fade, revelando a tela já pronta sem piscar. */}
+      {!isLoading && (isAuthenticated ? <AppStack /> : <AuthStack />)}
+      {splashMontado && (
+        <Animated.View
+          style={[StyleSheet.absoluteFill, { opacity: fade }]}
+          pointerEvents={pronto ? 'none' : 'auto'}
+        >
+          <SplashScreen />
+        </Animated.View>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  fill: {
+    flex: 1,
+  },
   splash: {
     flex: 1,
     backgroundColor: '#0A84FF',

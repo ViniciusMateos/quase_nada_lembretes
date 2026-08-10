@@ -30,6 +30,8 @@ import { formatTodayLabel, getWeekKey } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
 import { recurrenceLabel } from '../utils/recurrenceLabel';
 import { onEditReminder } from '../utils/editReminderIntent';
+import { getColdStartTarget, markColdStartReady } from '../utils/coldStartGate';
+import { registerScrollToTop } from '../utils/scrollToTopBus';
 import PreReminderPicker from '../components/PreReminderPicker';
 import AnimatedExpand from '../components/AnimatedExpand';
 import { useTabBarClearance } from '../components/LiquidTabBar';
@@ -200,6 +202,7 @@ const recurrenceTypes = () => [
 ];
 
 const intervalUnits = () => [
+  { key: 'minutes', label: t('reminders.unit.minutes') },
   { key: 'hours', label: t('reminders.unit.hours') },
   { key: 'days', label: t('reminders.unit.days') },
 ];
@@ -233,7 +236,8 @@ function intervalFromSeconds(seconds) {
   if (!seconds || seconds <= 0) return { value: '1', unit: 'days' };
   if (seconds % 86400 === 0) return { value: String(seconds / 86400), unit: 'days' };
   if (seconds % 3600 === 0) return { value: String(seconds / 3600), unit: 'hours' };
-  return { value: String(Math.max(1, Math.round(seconds / 3600))), unit: 'hours' };
+  if (seconds % 60 === 0) return { value: String(seconds / 60), unit: 'minutes' };
+  return { value: String(Math.max(1, Math.round(seconds / 60))), unit: 'minutes' };
 }
 
 function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
@@ -393,7 +397,7 @@ function EditReminderModal({ visible, reminder, onSave, onClose, theme }) {
     if (recurrence === 'interval_seconds') {
       const n = parseInt(intervalValue, 10);
       if (!n || n <= 0) newErrors.interval = t('reminders.error.interval');
-      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : 3600);
+      else intervalSeconds = n * (intervalUnit === 'days' ? 86400 : intervalUnit === 'hours' ? 3600 : 60);
     }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -729,6 +733,12 @@ export default function RemindersScreen({ navigation }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const tabClear = useTabBarClearance();
   const entrance = useFocusEntrance(2);
+  const listaRef = useRef(null);
+
+  // Tocar na aba "Lembretes" já ativa → rola a lista pro topo.
+  useEffect(() => registerScrollToTop('Lembretes', () => {
+    listaRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }), []);
 
   const [reminders, setReminders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -755,6 +765,7 @@ export default function RemindersScreen({ navigation }) {
     const alvo = reminders.find(r => r.id === pendingEditId);
     if (alvo) {
       setEditingReminder(alvo);
+      markColdStartReady('edit'); // modal de edição abrindo → libera o overlay
       setPendingEditId(null);
       return;
     }
@@ -765,7 +776,10 @@ export default function RemindersScreen({ navigation }) {
       .then(data => {
         if (cancelled) return;
         const found = (data.reminders || []).find(r => r.id === pendingEditId);
-        if (found) setEditingReminder(found);
+        if (found) {
+          setEditingReminder(found);
+          markColdStartReady('edit');
+        }
         setPendingEditId(null);
       })
       .catch(() => {
@@ -826,6 +840,8 @@ export default function RemindersScreen({ navigation }) {
       const data = await listReminders();
       setReminders(data.reminders || []);
       hasLoadedRemindersRef.current = true;
+      // Widget "Meus lembretes" (://lembretes): o alvo é a lista carregada.
+      if (getColdStartTarget() === 'lembretes') markColdStartReady('lembretes');
     } catch (err) {
       setError(t('reminders.loadError'));
       console.warn('[RemindersScreen] Erro ao carregar:', err);
@@ -984,6 +1000,7 @@ export default function RemindersScreen({ navigation }) {
             </View>
           )}
           <FlatList
+            ref={listaRef}
             data={sections}
             keyExtractor={item => item.id}
             renderItem={({ item }) => {
