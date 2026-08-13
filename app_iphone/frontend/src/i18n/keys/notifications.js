@@ -8,6 +8,7 @@ export default {
     'notifications.reminderPrefix': 'Lembrete: {titulo}',
     'notifications.snooze.5': 'Adiar 5 min',
     'notifications.snooze.10': 'Adiar 10 min',
+    'notifications.snooze.30': 'Adiar 30 min',
 
     'notifications.pre.title': 'Chegando: {titulo}',
     'notifications.pre.body': 'É {quando}, às {hora}.',
@@ -43,6 +44,7 @@ export default {
     'notifications.reminderPrefix': 'Reminder: {titulo}',
     'notifications.snooze.5': 'Snooze 5 min',
     'notifications.snooze.10': 'Snooze 10 min',
+    'notifications.snooze.30': 'Snooze 30 min',
 
     'notifications.pre.title': 'Coming up: {titulo}',
     'notifications.pre.body': "It's {quando}, at {hora}.",

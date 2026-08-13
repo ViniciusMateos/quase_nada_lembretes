@@ -11,6 +11,7 @@ const CHANNEL_ID = 'quase-nada-lembretes';
 export const CATEGORY_ID = 'lembrete';
 export const ACTION_SNOOZE_5 = 'snooze_5';
 export const ACTION_SNOOZE_10 = 'snooze_10';
+export const ACTION_SNOOZE_30 = 'snooze_30';
 
 // Sons empacotados no bundle nativo via plugin expo-notifications (app.config.js).
 // iOS usa o nome do arquivo; Android usa o recurso em res/raw (sem hífen/extensão).
@@ -103,6 +104,7 @@ export async function setupNotificationCategories() {
         actions: [
           { id: ACTION_SNOOZE_5, title: t('notifications.snooze.5') },
           { id: ACTION_SNOOZE_10, title: t('notifications.snooze.10') },
+          { id: ACTION_SNOOZE_30, title: t('notifications.snooze.30') },
         ],
       },
     ]);
@@ -182,6 +184,7 @@ function buildNotification(id, title, body, threadId = THREAD.LEMBRETE) {
       actions: [
         { title: t('notifications.snooze.5'), pressAction: { id: ACTION_SNOOZE_5 } },
         { title: t('notifications.snooze.10'), pressAction: { id: ACTION_SNOOZE_10 } },
+        { title: t('notifications.snooze.30'), pressAction: { id: ACTION_SNOOZE_30 } },
       ],
     },
     ios: {
@@ -523,9 +526,9 @@ export async function handleNotificationEvent({ type, detail }) {
   try {
     if (type !== EventType.ACTION_PRESS) return;
     const actionId = detail?.pressAction?.id;
-    if (actionId !== ACTION_SNOOZE_5 && actionId !== ACTION_SNOOZE_10) return;
+    if (actionId !== ACTION_SNOOZE_5 && actionId !== ACTION_SNOOZE_10 && actionId !== ACTION_SNOOZE_30) return;
 
-    const minutes = actionId === ACTION_SNOOZE_5 ? 5 : 10;
+    const minutes = actionId === ACTION_SNOOZE_5 ? 5 : actionId === ACTION_SNOOZE_10 ? 10 : 30;
     const data = detail?.notification?.data || {};
     const reminderId = data.reminderId;
     const title = (data.title || detail?.notification?.body || t('notifications.fallbackTitle')).split('\n')[0];
