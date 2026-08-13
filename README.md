@@ -198,6 +198,7 @@ npx expo export --platform web --output-dir dist-web-qa
 - Quando entrar dependência nativa (ex.: `react-native-pager-view`), código Swift dos targets (widget/extensão) ou mudança de entitlement, é obrigatório gerar novo build iOS com `eas build`.
 - O `runtimeVersion` é **fixo** (`'1.0.0'` no `app.config.js`), desamarrado da `version`: dá pra bumpar a versão de marketing sem invalidar o OTA. **Só suba o `runtimeVersion` quando o código nativo mudar** — senão um app antigo baixaria um JS que espera um módulo que ele não tem.
 - Widgets e extensão de notificação vivem em `app_iphone/frontend/targets/` (via `@bacons/apple-targets`). A categoria da extensão fica no `targets/resumo-notif/Info.plist` escrito à mão — o plugin ignora o campo `infoPlist` do `expo-target.config.js`.
+- **Push remoto** (backend notifica com o app fechado) exige a entitlement `aps-environment` (`app.config.js`) → só vale a partir do build. Sons custom de notificação (`sound-receive.wav`/`sound-reminder.wav`) também são empacotados no build via o plugin `expo-notifications`.
 - **Versão OTA:** incremente `OTA_VERSION` em `src/constants/otaVersion.js` a **cada** `eas update`. O número aparece no rodapé do menu ("OTA #N · atualizado/build") e confirma no device que o bundle novo baixou. Não confundir com `version` (marketing) nem com `runtimeVersion` (compatibilidade nativa).
 
 Após o build (~15 minutos), a Expo disponibilizará um link para download do arquivo `.ipa`. Instale no iPhone com [Sideloadly](https://sideloadly.io/) (Windows/Mac).
@@ -524,7 +525,7 @@ Campos opcionais: `name`, `priority`, `notes`, `completed`, `week_key` (semana d
 
 ### Push Notifications
 
-> Scaffolding — o **envio** de push é fase 2. Por enquanto a API só registra o token do dispositivo.
+> O backend **envia push** (Expo Push) quando cria um lembrete a partir de uma mensagem — assim a notificação de "lembrete criado" chega mesmo com o app fechado/matado. O app registra o token via `/push/register`. Em foreground o push é suprimido (o feedback in-app cobre). Exige a entitlement `aps-environment` no build.
 
 #### `POST /push/register` — Registrar token de push
 
@@ -609,7 +610,7 @@ chat_history
   ├── intent
   └── model_used
 
-push_tokens               # scaffolding (envio = fase 2)
+push_tokens               # tokens de push por usuário (backend envia via Expo Push)
   ├── id (PK)
   ├── user_id (FK → users)
   ├── token (unique)
@@ -736,7 +737,7 @@ quase_nada_lembretes/
     │       │   ├── messages/  # Chat com a IA
     │       │   ├── reminders/ # CRUD de lembretes (incl. recorrência por dias da semana)
     │       │   ├── tasks/     # CRUD de tarefas semanais (carry-over, prioridades, ordem)
-    │       │   └── push/      # Registro de tokens de push (scaffolding)
+    │       │   └── push/      # Tokens de push + envio via Expo Push (sender.py)
     │       ├── middleware/    # Tratamento global de erros
     │       └── models/        # Modelos SQLAlchemy (User, Reminder, Task, ChatHistory, PushToken)
     │
