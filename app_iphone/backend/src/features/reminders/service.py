@@ -117,10 +117,18 @@ def _align_first_occurrence(
     próxima ocorrência válida. Cobre todos os tipos de recorrência.
     """
     if not recurrence or recurrence == "once":
-        nxt = base
-        while nxt <= now:
-            nxt += timedelta(days=1)
-        return nxt
+        if base <= now:
+            # Passou há POUCO (ex.: "me lembra em 30 segundos", que a IA devolve
+            # truncado no minuto e cai alguns segundos no passado): não faz sentido
+            # empurrar pro dia seguinte — dispara logo em seguida.
+            if now - base <= timedelta(minutes=2):
+                return now + timedelta(seconds=5)
+            # Passou de verdade (um horário-do-dia que já era): rola pra amanhã.
+            nxt = base
+            while nxt <= now:
+                nxt += timedelta(days=1)
+            return nxt
+        return base
 
     if recurrence == "weekly_days":
         ds = set(days or [])
