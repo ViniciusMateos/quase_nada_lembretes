@@ -11,6 +11,21 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.6.1] - 2026-08-13
+
+### Added
+- **Push do backend**: quando o backend cria um lembrete a partir de uma mensagem, ele mesmo dispara um push (Expo Push) — a notificação de "lembrete criado" chega mesmo com o app **fechado/matado**. Em foreground o push é suprimido (o feedback in-app cobre). Exige a entitlement `aps-environment` (vale a partir do build).
+- **Adiar 30 min** na notificação — agora são três opções (5 / 10 / 30).
+
+### Fixed
+- **Lembrete duplicado ao enviar-e-sair**: a requisição chegava no servidor mas a resposta se perdia no background; o app reenfileirava e o backend recriava o lembrete. Agora cada mensagem carrega um `client_message_id` idempotente e o reenvio devolve o resultado já processado, sem duplicar.
+- Lembrete **"em X segundos"** ia parar no dia seguinte (o horário truncado no minuto caía no passado e o alinhamento rolava um dia inteiro). Agora, se passou há pouco, dispara logo em seguida.
+
+### Documentação
+- README: push do backend implementado (não mais scaffolding).
+
+---
+
 ## [1.6.0] - 2026-08-10
 
 ### Added
