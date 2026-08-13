@@ -22,12 +22,15 @@ const SESSION_ID = `sess_${Date.now().toString(36)}_${Math.random().toString(36)
  *   model_used: string
  * }>}
  */
-export async function sendMessage({ content, client_timestamp }) {
+export async function sendMessage({ content, client_timestamp, client_message_id }) {
   const response = await apiClient.post('/api/v1/messages', {
     content,
     client_timestamp,
     hour_format: detectIs12h() ? '12h' : '24h',
     session_id: SESSION_ID,
+    // Idempotência: reenvios da fila usam o MESMO id → o backend devolve o
+    // resultado já processado em vez de recriar o lembrete (duplicado).
+    client_message_id,
   }, { timeout: 90000 });
   return response.data;
 }

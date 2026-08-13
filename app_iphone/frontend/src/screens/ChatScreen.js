@@ -24,6 +24,7 @@ import { requestPermission, scheduleFromSync, notifyChatBanner, chatResponseText
 import { enqueueMessage, drainQueue } from '../services/messageQueue';
 import { showInAppBanner } from '../utils/inAppBanner';
 import { navigationRef } from '../api/client';
+import { registerPushToken } from '../services/push';
 import { detectIs12h } from '../utils/timeFormat';
 import { formatTodayLabel } from '../utils/dateUtils';
 import { tabPos, animateTabTo } from '../utils/tabSwipe';
@@ -204,6 +205,10 @@ export default function ChatScreen({ navigation }) {
     }
   }, []);
 
+  // Registra o token de push (pro backend notificar de fora do app). No-op em
+  // build sem a entitlement de push — só passa a valer a partir do próximo build.
+  useEffect(() => { registerPushToken(); }, []);
+
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
@@ -318,12 +323,12 @@ export default function ChatScreen({ navigation }) {
   }, [drainOfflineQueue]);
 
   // Esvazia a fila quando o app volta pro foreground (caso o NetInfo não tenha
-  // disparado) E também quando o app VAI pro background: se ficou algo na fila,
-  // aproveita a janela de graça do iOS pra mandar e disparar a notificação de
-  // "lembrete criado" de fora, sem esperar o background-fetch (que é agendado).
+  // disparado). O reenvio é deduplicado pelo client_message_id, então não recria
+  // lembrete. Não drenamos ao IR pro background (evita reenvio na janela de graça
+  // correndo com a requisição original) — a notificação de fora vem do push.
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active' || state === 'background') drainOfflineQueue();
+      if (state === 'active') drainOfflineQueue();
     });
     return () => sub.remove();
   }, [drainOfflineQueue]);
@@ -412,6 +417,10 @@ export default function ChatScreen({ navigation }) {
       const result = await sendMessage({
         content,
         client_timestamp: userMessage.timestamp,
+        // Id idempotente estável da mensagem: se a resposta se perder (app foi pro
+        // background) e a fila reenviar, o backend devolve o mesmo resultado em
+        // vez de recriar o lembrete.
+        client_message_id: userMessage.id,
       });
 
       setShowTyping(false);
@@ -463,21 +472,23 @@ export default function ChatScreen({ navigation }) {
 
       if (isNetworkError) {
         // Sem conexão / queda no meio da requisição → enfileira para reenviar.
+        // O client_message_id garante que o reenvio NÃO recria o lembrete: se a
+        // original já tinha chegado no servidor (caso clássico de enviar-e-sair,
+        // em que a resposta se perde no background), o backend devolve o mesmo
+        // resultado. O reenvio acontece ao voltar pro app ou no background-fetch.
         enqueueMessage({
           content,
           client_timestamp: userMessage.timestamp,
           hour_format: detectIs12h() ? '12h' : '24h',
+          client_message_id: userMessage.id,
         });
 
-        // Se a falha foi porque o usuário SAIU do app (a requisição em voo morre
-        // ao ir pro background), não é offline de verdade: tenta reenviar já, na
-        // janela de graça que o iOS dá na transição — o reenvio dispara a
-        // notificação de "lembrete criado" de fora. Se não der, o background-fetch
-        // pega a fila depois. E não mostramos o erro vermelho de offline (que
-        // ficaria mentindo no chat quando o usuário voltasse).
-        if (AppState.currentState !== 'active') {
-          drainOfflineQueue();
-        } else {
+        // Só mostramos o erro de offline se o usuário está OLHANDO o app. Se a
+        // falha foi por ter saído (background), não polui o chat com um erro que
+        // mentiria quando ele voltasse — a mensagem está na fila e será reenviada
+        // (deduplicada). Nada de reenviar na janela de graça: era o que corria com
+        // a requisição original e criava o DUPLICADO.
+        if (AppState.currentState === 'active') {
           addMessage({
             id: generateId(),
             role: 'assistant',

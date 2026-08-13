@@ -36,6 +36,10 @@ export default {
         // App Group: área compartilhada entre o app e os widgets. O app grava os
         // próximos lembretes aqui (ExtensionStorage) e o widget de lista lê.
         'com.apple.security.application-groups': ['group.com.quasenada.lembretes'],
+        // Push remoto (APNs) — necessário pro backend notificar "lembrete criado"
+        // com o app fechado/matado. 'production' casa com a distribuição ad hoc
+        // (perfil preview). SÓ entra em vigor no próximo `eas build`.
+        'aps-environment': 'production',
       },
       infoPlist: {
         UIBackgroundModes: ['fetch', 'processing', 'remote-notification'],

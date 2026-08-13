@@ -22,13 +22,16 @@ function writeQueue(items) {
   storage.set(KEY, JSON.stringify(items));
 }
 
-export function enqueueMessage({ content, client_timestamp, hour_format }) {
+export function enqueueMessage({ content, client_timestamp, hour_format, client_message_id }) {
   const items = readQueue();
   const item = {
     id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     content,
     client_timestamp,
     hour_format,
+    // Id idempotente da mensagem: o reenvio usa o mesmo, então o backend não
+    // recria o lembrete se a original já tinha chegado no servidor.
+    client_message_id,
     enqueued_at: new Date().toISOString(),
   };
   items.push(item);
@@ -61,6 +64,7 @@ export async function drainQueue(onSuccess) {
         const result = await sendMessage({
           content: item.content,
           client_timestamp: item.client_timestamp,
+          client_message_id: item.client_message_id,
         });
         items = readQueue().filter(i => i.id !== item.id);
         writeQueue(items);

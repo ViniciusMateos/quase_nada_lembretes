@@ -4,11 +4,13 @@ Classifies intent via Gemini → executes action → saves history → returns r
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.gemini_client import chat_general, classify_intent
@@ -21,7 +23,30 @@ from src.features.reminders.repository import (
 from src.features.reminders.service import create_reminder_from_data, find_reminders_for_deletion, update_reminder
 from src.features.reminders.schemas import ReminderUpdate
 from src.features.reminders.schemas import ReminderOut
+from src.features.push.sender import fetch_expo_tokens, fire_push
 from src.models.models import ChatHistory, User
+
+
+# Título/corpo do push de "fora do app". Só para ações que valem um aviso quando
+# o usuário não está olhando (criou/editou/removeu lembrete, ou uma pergunta da
+# IA). Chat comum não vira push. Retorna (title, body) ou None.
+_PUSH_TITLES = {
+    "reminder_created": "Lembrete criado",
+    "reminder_updated": "Lembrete atualizado",
+    "reminder_deleted": "Lembrete removido",
+}
+
+
+def _push_text(action: dict[str, Any] | None, response_text: str) -> tuple[str, str] | None:
+    tipo = (action or {}).get("type")
+    primeira_linha = (response_text or "").split("\n")[0].strip()
+    if tipo in _PUSH_TITLES:
+        reminder = (action or {}).get("reminder") or {}
+        body = reminder.get("title") or primeira_linha
+        return _PUSH_TITLES[tipo], body
+    if tipo in ("needs_time_clarification", "ambiguous"):
+        return "Nova mensagem", primeira_linha or "Toque para responder"
+    return None
 
 
 async def _save_history(
@@ -71,6 +96,25 @@ async def process_message(
     payload: MessageRequest,
 ) -> MessageResponse:
     message_id = str(uuid.uuid4())
+
+    # ── Idempotência ──────────────────────────────────────────────────────────
+    # Se o cliente mandou um client_message_id e já processamos essa mensagem
+    # (mesmo id), devolve o resultado guardado SEM recriar o lembrete. É isto que
+    # impede o duplicado quando a fila offline reenvia uma mensagem cuja resposta
+    # se perdeu (app foi pro background ao enviar).
+    cid = payload.client_message_id
+    if cid:
+        cached = (
+            await db.execute(
+                text(
+                    "SELECT response_json FROM message_idempotency "
+                    "WHERE user_id = :u AND client_message_id = :c"
+                ),
+                {"u": user.id, "c": cid},
+            )
+        ).first()
+        if cached and cached[0]:
+            return MessageResponse(**json.loads(cached[0]))
 
     # Buscar histórico ANTES de salvar a mensagem atual para não duplicar
     history = await _get_recent_history(db, user.id, payload.session_id)
@@ -262,14 +306,48 @@ async def process_message(
 
     await _save_history(db, user.id, "assistant", response_text, intent=intent, model_used=model_used, session_id=payload.session_id)
 
-    # Commit explícito antes de retornar: garante que o reminder já está no banco
-    # quando o app chamar /sync imediatamente após receber a resposta.
-    await db.commit()
-
-    return MessageResponse(
+    response = MessageResponse(
         message_id=message_id,
         response=response_text,
         intent=intent,
         action=action,
         model_used=model_used,
     )
+
+    # Guarda o resultado para reenvios idempotentes (INSERT OR IGNORE: se dois
+    # reenvios correrem juntos, o primeiro fica; o segundo lê o cache no topo).
+    if cid:
+        await db.execute(
+            text(
+                "INSERT OR IGNORE INTO message_idempotency "
+                "(user_id, client_message_id, response_json, created_at) "
+                "VALUES (:u, :c, :j, :t)"
+            ),
+            {
+                "u": user.id,
+                "c": cid,
+                "j": response.model_dump_json(),
+                "t": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    # Commit explícito antes de retornar: garante que o reminder já está no banco
+    # quando o app chamar /sync imediatamente após receber a resposta.
+    await db.commit()
+
+    # Push de fora do app (best-effort). Busca os tokens do usuário AGORA (dentro
+    # da requisição) e dispara sem bloquear a resposta. Se não há token registrado
+    # (build ainda sem push), não faz nada.
+    push = _push_text(action, response_text)
+    if push:
+        try:
+            tokens = await fetch_expo_tokens(db, user.id)
+            data: dict[str, Any] = {}
+            rem = (action or {}).get("reminder") or {}
+            if rem.get("id"):
+                data = {"reminderId": rem["id"]}
+            fire_push(tokens, push[0], push[1], data)
+        except Exception:  # noqa: BLE001 — push nunca derruba a resposta
+            pass
+
+    return response

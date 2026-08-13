@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Animated, Easing, Linking, StyleSheet, View, useWindowDimensions } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
+import * as ExpoNotifications from 'expo-notifications';
 import { requestCompose } from './src/utils/composeIntent';
 import { openReminderEditFromNotification, requestEditReminder, coldStartTargetFromNotification } from './src/utils/editReminderIntent';
 import { armColdStart, markColdStartReady, onColdStartReady } from './src/utils/coldStartGate';
@@ -105,6 +106,37 @@ export default function App() {
         openReminderEditFromNotification(detail.notification);
       }
     });
+  }, []);
+
+  // Toque em PUSH REMOTO (backend, via expo-notifications) — separado do notifee
+  // (local). reminderId → abre a edição daquele lembrete; senão → abre o Chat.
+  // Cobre também o app matado (getLastNotificationResponseAsync). Só há push a
+  // partir do build com a entitlement; no build atual isto fica inerte.
+  useEffect(() => {
+    const rotearPush = resp => {
+      const data = resp?.notification?.request?.content?.data || {};
+      if (data.reminderId) {
+        ativarGate('edit');
+        openReminderEditFromNotification({ data: { reminderId: String(data.reminderId) } });
+        return;
+      }
+      ativarGate('chat');
+      const ir = () => { try { navigationRef.current?.navigate('Main', { screen: 'Chat' }); } catch (e) {} };
+      if (navigationRef.current?.isReady?.()) ir();
+      else {
+        let n = 0;
+        const esperar = () => {
+          if (navigationRef.current?.isReady?.()) ir();
+          else if (n++ < 120) requestAnimationFrame(esperar);
+        };
+        requestAnimationFrame(esperar);
+      }
+    };
+    ExpoNotifications.getLastNotificationResponseAsync()
+      .then(r => { if (r) rotearPush(r); })
+      .catch(() => {});
+    const sub = ExpoNotifications.addNotificationResponseReceivedListener(rotearPush);
+    return () => sub.remove();
   }, []);
 
   // Deep links dos widgets. Cada widget abre numa tela diferente:

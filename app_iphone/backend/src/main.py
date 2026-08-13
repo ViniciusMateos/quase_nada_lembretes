@@ -103,6 +103,18 @@ async def _run_migrations() -> None:
             await conn.execute(text("ALTER TABLE chat_history ADD COLUMN session_id TEXT"))
             logger.info("Migração: coluna chat_history.session_id adicionada.")
 
+        # Idempotência de mensagens: guarda a resposta já processada por
+        # (user_id, client_message_id). Reenvios da fila offline batem aqui e
+        # recebem o MESMO resultado em vez de recriar o lembrete (duplicado).
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS message_idempotency ("
+            "user_id TEXT NOT NULL, "
+            "client_message_id TEXT NOT NULL, "
+            "response_json TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, "
+            "PRIMARY KEY (user_id, client_message_id))"
+        ))
+
         # Scaffolding de push (fase 2) — cria a tabela se ainda não existir.
         await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS push_tokens ("
