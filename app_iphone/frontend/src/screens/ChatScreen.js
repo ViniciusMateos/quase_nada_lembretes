@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
 import { sendMessage } from '../api/messages.api';
 import { deleteReminder, syncReminders, listReminders } from '../api/reminders.api';
-import { requestPermission, scheduleFromSync, notifyChatBanner, chatResponseText } from '../services/notifications';
+import { requestPermission, scheduleFromSync, chatResponseText } from '../services/notifications';
 import { enqueueMessage, drainQueue } from '../services/messageQueue';
 import { showInAppBanner } from '../utils/inAppBanner';
 import { navigationRef } from '../api/client';
@@ -67,16 +67,15 @@ function generateId() {
 
 // Roteia a notificação de QUALQUER resposta do chat (ação de lembrete OU mensagem
 // comum, como a pergunta de horário). `txt` = { title, body } ou null.
+//
+// SÓ cuida do FOREGROUND: quando o app está fechado/em background, quem avisa é o
+// PUSH do backend (título já no idioma do usuário). Disparar aqui uma notificação
+// local também causava notificação DOBRADA e em idioma errado.
 function routeChatNotification(txt) {
   if (!txt || (!txt.title && !txt.body)) return;
-  // App em background → notificação de verdade do iOS (com o som de criado/mensagem).
-  if (AppState.currentState !== 'active') {
-    notifyChatBanner(txt.title, txt.body);
-    return;
-  }
-  // App em foreground: o iOS não mostra notificação. Se o usuário está na tela de
-  // Chat, ele já vê a resposta ali (nada a fazer). Se saiu pra outra aba, mostra a
-  // notificação SIMULADA in-app (mesma pegada da real).
+  if (AppState.currentState !== 'active') return; // background → push do backend
+  // Foreground: o iOS não mostra notificação. Na tela de Chat o usuário já vê a
+  // resposta (nada a fazer). Em outra aba, mostra a notificação SIMULADA in-app.
   const rota = navigationRef.current?.getCurrentRoute?.()?.name;
   if (rota && rota !== 'Chat') showInAppBanner(txt);
 }

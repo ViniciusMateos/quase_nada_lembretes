@@ -11,7 +11,7 @@
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import { drainQueue } from './messageQueue';
-import { displayLocalNotification, notifyReminderAction, scheduleFromSync } from './notifications';
+import { scheduleFromSync } from './notifications';
 import { syncReminders } from '../api/reminders.api';
 
 export const BACKGROUND_QUEUE_TASK = 'background-message-queue';
@@ -33,17 +33,11 @@ async function resyncEmBackground() {
 
 TaskManager.defineTask(BACKGROUND_QUEUE_TASK, async () => {
   try {
-    const sent = await drainQueue(async (item, result) => {
-      // Mesma notificação de "lembrete criado/atualizado/removido" que apareceria
-      // dentro do app — só que disparada de fora, já que foi processado em background.
-      const tipo = result?.action?.type;
-      const notificou = await notifyReminderAction(tipo, result?.action);
-      // Se não foi uma ação de lembrete (ex.: resposta comum da IA), avisa genérico.
-      if (!notificou) {
-        const body = result?.response ? String(result.response).split('\n')[0] : 'Lembrete registrado';
-        await displayLocalNotification('Lembrete registrado', body);
-      }
-    });
+    // Só drena a fila (garante que a mensagem chegue no servidor). NÃO dispara
+    // notificação local aqui: quem avisa "lembrete criado" de fora é o PUSH do
+    // backend. Disparar também aqui causava notificação DOBRADA e em idioma
+    // errado (o push com o título, a local traduzida à parte).
+    const sent = await drainQueue();
     const resynced = await resyncEmBackground();
     return sent > 0 || resynced
       ? BackgroundFetch.BackgroundFetchResult.NewData

@@ -9,6 +9,7 @@ class MessageRequest(BaseModel):
     hour_format: str = Field(default="24h", description="'12h' (AM/PM) ou '24h' — formato de hora do usuário")
     session_id: str | None = Field(default=None, description="ID da sessão de chat (uma por abertura do app) — mantém o contexto da conversa por sessão")
     client_message_id: str | None = Field(default=None, description="ID idempotente gerado pelo cliente por mensagem. Reenvios (fila offline) usam o MESMO id; o backend devolve o resultado já processado em vez de recriar o lembrete.")
+    lang: str | None = Field(default="pt", description="Idioma da interface do app ('pt'/'en') — usado só para o TÍTULO do push de fora do app.")
 
     @field_validator("content")
     @classmethod

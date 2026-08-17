@@ -5,6 +5,7 @@
 
 import apiClient from './client';
 import { detectIs12h } from '../utils/timeFormat';
+import { getLang } from '../i18n';
 
 // ID de sessão do chat — gerado UMA vez por abertura do app (enquanto este módulo
 // vive na memória). Mantém o contexto da IA por sessão e zera só quando o app é
@@ -31,6 +32,8 @@ export async function sendMessage({ content, client_timestamp, client_message_id
     // Idempotência: reenvios da fila usam o MESMO id → o backend devolve o
     // resultado já processado em vez de recriar o lembrete (duplicado).
     client_message_id,
+    // Idioma da interface — o backend usa só pro TÍTULO do push de fora do app.
+    lang: getLang(),
   }, { timeout: 90000 });
   return response.data;
 }

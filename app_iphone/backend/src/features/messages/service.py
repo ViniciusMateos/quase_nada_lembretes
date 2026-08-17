@@ -29,23 +29,36 @@ from src.models.models import ChatHistory, User
 
 # Título/corpo do push de "fora do app". Só para ações que valem um aviso quando
 # o usuário não está olhando (criou/editou/removeu lembrete, ou uma pergunta da
-# IA). Chat comum não vira push. Retorna (title, body) ou None.
+# IA). Chat comum não vira push. O TÍTULO segue o idioma do app (o cliente manda
+# `lang`); o corpo é o título do lembrete (conteúdo do usuário, não traduz).
 _PUSH_TITLES = {
-    "reminder_created": "Lembrete criado",
-    "reminder_updated": "Lembrete atualizado",
-    "reminder_deleted": "Lembrete removido",
+    "pt": {
+        "reminder_created": "Lembrete criado",
+        "reminder_updated": "Lembrete atualizado",
+        "reminder_deleted": "Lembrete removido",
+    },
+    "en": {
+        "reminder_created": "Reminder created",
+        "reminder_updated": "Reminder updated",
+        "reminder_deleted": "Reminder deleted",
+    },
 }
+_PUSH_MSG_TITLE = {"pt": "Nova mensagem", "en": "New message"}
+_PUSH_MSG_FALLBACK = {"pt": "Toque para responder", "en": "Tap to reply"}
 
 
-def _push_text(action: dict[str, Any] | None, response_text: str) -> tuple[str, str] | None:
+def _push_text(
+    action: dict[str, Any] | None, response_text: str, lang: str | None
+) -> tuple[str, str] | None:
+    lng = "en" if str(lang or "pt").lower().startswith("en") else "pt"
     tipo = (action or {}).get("type")
     primeira_linha = (response_text or "").split("\n")[0].strip()
-    if tipo in _PUSH_TITLES:
+    if tipo in _PUSH_TITLES[lng]:
         reminder = (action or {}).get("reminder") or {}
         body = reminder.get("title") or primeira_linha
-        return _PUSH_TITLES[tipo], body
+        return _PUSH_TITLES[lng][tipo], body
     if tipo in ("needs_time_clarification", "ambiguous"):
-        return "Nova mensagem", primeira_linha or "Toque para responder"
+        return _PUSH_MSG_TITLE[lng], primeira_linha or _PUSH_MSG_FALLBACK[lng]
     return None
 
 
@@ -338,7 +351,7 @@ async def process_message(
     # Push de fora do app (best-effort). Busca os tokens do usuário AGORA (dentro
     # da requisição) e dispara sem bloquear a resposta. Se não há token registrado
     # (build ainda sem push), não faz nada.
-    push = _push_text(action, response_text)
+    push = _push_text(action, response_text, payload.lang)
     if push:
         try:
             tokens = await fetch_expo_tokens(db, user.id)
