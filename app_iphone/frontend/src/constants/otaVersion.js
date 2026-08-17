@@ -8,4 +8,4 @@
 // Não confundir com:
 //   - `version` (1.5.0) no package.json/app.config → versão de marketing do app
 //   - `runtimeVersion` (1.0.0) fixo → compatibilidade OTA×nativo (só muda em build)
-export const OTA_VERSION = 11;
+export const OTA_VERSION = 12;
