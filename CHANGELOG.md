@@ -11,6 +11,14 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.6.2] - 2026-08-17
+
+### Fixed
+- Notificação de **"lembrete criado" chegava dobrada** com o app fechado: o push do backend + uma notificação local do frontend (do background-fetch). Agora fechado/em background quem avisa é só o push; o frontend só notifica em foreground (banner in-app).
+- O **título do push** vinha fixo em português ("Lembrete criado") mesmo com o inglês selecionado. Agora o app manda o idioma e o push monta o título no idioma certo ("Reminder created" / "Lembrete criado").
+
+---
+
 ## [1.6.1] - 2026-08-13
 
 ### Added
