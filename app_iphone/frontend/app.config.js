@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? 'QN Lembretes DEV' : 'Quase Nada Lembretes',
     slug: 'quase-nada-lembretes',
-    version: '1.6.2',
+    version: '1.7.0',
     // URL scheme p/ deep link (widget "clique para ser lembrado" → abre o Chat).
     scheme: 'quasenadalembretes',
     orientation: 'portrait',

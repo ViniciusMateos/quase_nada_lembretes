@@ -11,6 +11,17 @@ Versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.7.0] - 2026-09-04
+
+### Adicionado
+- feat: menu avisa OTA desatualizada + botão "Atualizar agora" — checa versão nova ao abrir e mostra "desatualizado" em amarelo; baixa e reabre com overlay "Atualizando…" (cachorro) em fade antes do reload
+
+### Modificado
+- update: prompt de pré-lembretes entende lista com a unidade só no fim ("30, 40 e 45 minutos antes" vira um aviso por número), e deixa claro que pré-lembrete é aviso ANTES do lembrete real
+- update: splash escura no reload casa com o overlay — sem flash ao aplicar OTA (nativo, vale no build)
+
+---
+
 ## [1.6.2] - 2026-08-17
 
 ### Fixed
