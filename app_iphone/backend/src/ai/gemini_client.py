@@ -80,7 +80,9 @@ Para CRIAR_LEMBRETE, extraia:
 - precisa_ampm: true SOMENTE se o "Formato de hora do usuário" for "12h" E o horário mencionado tiver hora de 1 a 12 SEM indicação de manhã/tarde/noite/AM/PM (ex: "às 9h", "às 7", "8 e meia"). Se o usuário disser "9 da manhã", "9 da noite", "21h", "meio-dia", "meia-noite", ou o formato for "24h" → precisa_ampm = false. Quando true, ainda preencha data_hora com seu melhor palpite (manhã).
 - hora_ambigua: quando precisa_ampm=true, a hora no formato "H:MM" (ex: "9:00"). Senão null.
 - data_fim: data de término ISO 8601 com offset (se mencionado, senão null)
-- pre_lembretes: lista de inteiros de SEGUNDOS antes do disparo, quando o usuário pedir avisos ANTECIPADOS ("me lembra X antes", "me avisa X antes"). Ex.: "me lembra 30 minutos antes" = [1800]; "uma semana antes e 1 hora antes" = [604800, 3600]; "meia hora e 10 min antes" = [1800, 600]. Pode ter VÁRIOS. Se não pedir aviso antecipado, use [] ou null. (offsets comuns: 30min=1800, 1h=3600, 1 dia=86400, 1 semana=604800.)
+- pre_lembretes: lista de inteiros de SEGUNDOS antes do disparo, quando o usuário pedir avisos ANTECIPADOS ("me lembra X antes", "me avisa X antes"). São avisos ANTES do lembrete de verdade — NÃO são lembretes separados; o lembrete real continua sendo o data_hora. Pode ter VÁRIOS. Ex.: "me lembra 30 minutos antes" = [1800]; "uma semana antes e 1 hora antes" = [604800, 3600]; "meia hora e 10 min antes" = [1800, 600].
+  IMPORTANTE — lista de números com a UNIDADE só no FINAL: quando o usuário enumera vários números separados por vírgula e/ou "e" com a unidade aparecendo UMA vez no fim ("30, 40 e 45 minutos antes", "5, 10, 15 min antes", "1, 2 e 3 horas antes"), cada número recebe essa unidade → um pré-aviso para CADA número. Ex.: "30, 40 e 45 minutos antes" = [1800, 2400, 2700]; "5, 10 e 15 min antes" = [300, 600, 900]; "1 e 2 horas antes" = [3600, 7200].
+  Se não pedir aviso antecipado, use [] ou null. (offsets comuns: 15min=900, 30min=1800, 45min=2700, 1h=3600, 1 dia=86400, 1 semana=604800.)
 
 REGRA CRÍTICA SOBRE RECORRÊNCIA:
 - Se a mensagem contém uma data/hora específica SEM palavras de repetição → recorrencia = "once"
@@ -113,6 +115,9 @@ Mensagem: "trombar a byby 18h30 e me lembra 30 minutos antes"
 
 Mensagem: "reunião quarta 9h, me avisa uma semana antes e 1 hora antes"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Reunião", "data_hora": "2026-04-29T09:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "days_of_week": null, "pre_lembretes": [604800, 3600], "data_fim": null}}}}
+
+Mensagem: "me lembra de postar a encomenda às 6h de amanhã e me avisa 30, 40 e 45 minutos antes"
+{{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Postar a encomenda", "data_hora": "2026-04-25T06:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "days_of_week": null, "pre_lembretes": [1800, 2400, 2700], "data_fim": null}}}}
 
 Mensagem: "me lembra de ligar pro médico amanhã às 10h"
 {{"intencao": "CRIAR_LEMBRETE", "dados": {{"titulo": "Ligar pro médico", "data_hora": "2026-04-25T10:00:00-03:00", "recorrencia": "once", "interval_seconds": null, "data_fim": null}}}}
