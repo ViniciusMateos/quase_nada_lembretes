@@ -10,6 +10,19 @@ export default {
     orientation: 'portrait',
     icon: IS_DEV ? './assets/icon-dev.png' : './assets/icon-prod.png',
     userInterfaceStyle: 'dark',
+    // Fundo nativo = cor do overlay "Atualizando…" (theme.background do tema
+    // ESCURO, #0B0B0D — HamburgerMenu.js usa theme.background a 0.96). Casa a
+    // splash nativa com o overlay do OTA: o reload (reloadAsync) fica
+    // escuro→escuro, sem o flash de cor.
+    backgroundColor: '#0B0B0D',
+    // Splash ESCURA (#0B0B0D + cachorro branco, o mesmo apenas-cachorro.png que o
+    // LoadingDog do overlay mostra). 'cover' preenche a tela toda sem borda. Só
+    // entra em vigor no PRÓXIMO build (config nativa) — não pega por OTA.
+    splash: {
+      image: './assets/splash_escuro.png',
+      resizeMode: 'cover',
+      backgroundColor: '#0B0B0D',
+    },
     // SDK 54: New Architecture (exigida pelo react-native-mmkv v3).
     newArchEnabled: true,
     // OTA updates (expo-updates): recarrega o JS de um build já instalado sem
